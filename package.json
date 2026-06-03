@@ -1,0 +1,26 @@
+{
+  "name": "mf-tracker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "start": "node server.js",
+    "dev": "concurrently \"node server.js\" \"vite\""
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "cookie-parser": "^1.4.7",
+    "express": "^4.21.2",
+    "lucide-react": "^0.460.0",
+    "papaparse": "^5.4.1",
+    "pg": "^8.13.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "vite": "^5.4.11"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  },
+  "engines": { "node": ">=20" }
+}
