@@ -1,3 +1,8 @@
+2026-06-04  Add per-column filter row (Excel-style)
+            - App.jsx: Filter icon; showFilters/filters/setFilter state; activeFilters/filterCount/
+              filtered (useMemo); Filters button + Clear link in toolbar; tbl-filter <tr> in <thead>;
+              <tbody> now renders filtered list with "no match" empty state
+            - styles.css: .tbl-filter th/input/select rules appended
 2026-06-04  Add drag-to-reorder for table columns
             - App.jsx: useRef added; dragCol ref + moveCol splice helper in Tracker;
               <th> elements get draggable + onDragStart/onDragOver/onDrop handlers

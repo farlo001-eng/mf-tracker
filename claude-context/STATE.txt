@@ -34,6 +34,14 @@ The property detail is now a focused modal overlay rendered via `createPortal` i
 - `client/src/App.jsx` — `createPortal` import; Escape handler useEffect; inline
   `tbl-detail` tr replaced with portal modal
 
+### Per-column filtering
+A "Filters" button in the toolbar toggles a `tbl-filter` row inside `<thead>`. Each
+visible column gets an `<input>` (contains, case-insensitive) or a `<select>` (status
+exact-match). `activeFilters` derives from `filters` state filtered to currently-visible
+columns. `filtered` is a `useMemo` over `props × filters × cols`. The Filters button
+turns rust-coloured and shows a count badge when any filter is active; a "Clear" link
+appears beside it. The "no match" empty state is a full-width `<td>` row in `<tbody>`.
+
 ### Column reordering
 Columns can be dragged to reorder by dragging a header cell. A `dragCol` ref holds the
 field key of the column being dragged; `moveCol(from, to)` splices `cols` state in place

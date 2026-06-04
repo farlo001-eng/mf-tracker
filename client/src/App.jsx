@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import Papa from "papaparse";
 import {
   Phone, Mail, MessageSquare, Send, Plus, Search, X, Trash2, Clock, Check,
-  ChevronDown, ChevronRight, MapPin, User, Upload, Star, LogOut, Building2, Columns,
+  ChevronDown, ChevronRight, MapPin, User, Upload, Star, LogOut, Building2, Columns, Filter,
 } from "lucide-react";
 
 /* ---------------- constants & helpers ---------------- */
@@ -94,6 +94,9 @@ function Tracker({ onLogout }) {
   const [importing, setImporting] = useState(false);
 
   const [showCols, setShowCols] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
+  const [filters, setFilters] = useState({});
+  const setFilter = (field, val) => setFilters((f) => ({ ...f, [field]: val }));
   const [cols, setCols] = useState(() => {
     try { const s = JSON.parse(localStorage.getItem("mf_cols")); if (Array.isArray(s) && s.length) return s; } catch {}
     return DEFAULT_COLS;
@@ -138,6 +141,17 @@ function Tracker({ onLogout }) {
   }, [props]);
   const allKeys = [...Object.keys(CORE_COLS), ...extraKeys.filter((k) => !(k in CORE_COLS))];
   const visibleCols = cols.map(colDesc);
+  const activeFilters = Object.entries(filters).filter(([f, v]) => cols.includes(f) && v && v !== "All" && String(v).trim() !== "");
+  const filterCount = activeFilters.length;
+  const filtered = useMemo(() => {
+    if (!activeFilters.length) return props;
+    return props.filter((p) => activeFilters.every(([field, fv]) => {
+      const c = colDesc(field);
+      const val = colVal(p, c);
+      if (c.type === "status") return val === fv;
+      return String(val ?? "").toLowerCase().includes(String(fv).toLowerCase());
+    }));
+  }, [props, filters, cols]);
 
   return (
     <div style={{ maxWidth: 1180, margin: "0 auto", padding: "24px 16px 60px" }}>
@@ -212,6 +226,10 @@ function Tracker({ onLogout }) {
             </div>
           )}
         </div>
+        <button className="btn" style={{ background: "var(--surface)", border: "1px solid var(--line)", color: filterCount ? "var(--rust)" : "var(--ink)", display: "flex", alignItems: "center", gap: 6 }} onClick={() => setShowFilters((v) => !v)}>
+          <Filter size={16} /> Filters{filterCount ? ` · ${filterCount}` : ""}
+        </button>
+        {filterCount > 0 && <button className="link" onClick={() => setFilters({})}>Clear</button>}
       </div>
 
       {/* status pills */}
@@ -246,9 +264,29 @@ function Tracker({ onLogout }) {
                 ))}
                 <th style={{ width: 34 }}></th>
               </tr>
+              {showFilters && (
+                <tr className="tbl-filter">
+                  <th></th>
+                  {visibleCols.map((c) => (
+                    <th key={c.field}>
+                      {c.type === "status" ? (
+                        <select value={filters[c.field] || "All"} onChange={(e) => setFilter(c.field, e.target.value)}>
+                          <option>All</option>
+                          {Object.keys(STATUSES).map((s) => <option key={s}>{s}</option>)}
+                        </select>
+                      ) : (
+                        <input placeholder="filter…" value={filters[c.field] || ""} onChange={(e) => setFilter(c.field, e.target.value)} />
+                      )}
+                    </th>
+                  ))}
+                  <th></th>
+                </tr>
+              )}
             </thead>
             <tbody>
-              {props.map((p) => (
+              {filtered.length === 0 ? (
+                <tr><td colSpan={visibleCols.length + 2} style={{ padding: "22px", textAlign: "center", color: "var(--inkSoft)", fontSize: 13 }}>No properties match your filters.</td></tr>
+              ) : filtered.map((p) => (
                 <PropertyRow key={p.id} p={p} cols={visibleCols} today={today} open={expanded === p.id}
                   onToggle={() => setExpanded(expanded === p.id ? null : p.id)} onChange={refresh} />
               ))}

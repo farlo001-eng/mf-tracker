@@ -47,3 +47,7 @@ input,textarea,select{outline:none}
 .detail-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:15px 18px;border-bottom:1px solid var(--lineSoft);background:var(--surface);border-radius:12px 12px 0 0;flex-shrink:0}
 .detail-body{padding:18px;overflow:auto;display:flex;flex-direction:column;gap:14px}
 .tbl thead th[draggable]:active{cursor:grabbing;color:var(--rust)}
+/* per-column filter row */
+.tbl-filter th{position:static;padding:5px 6px;background:var(--surface2);border-bottom:1px solid var(--line)}
+.tbl-filter input,.tbl-filter select{width:100%;font-size:12px;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--ink)}
+.tbl-filter input:focus,.tbl-filter select:focus{border-color:var(--rust)}
