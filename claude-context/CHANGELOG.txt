@@ -1,3 +1,8 @@
+2026-06-03  Replace card list with inline-editable spreadsheet table
+            - styles.css: appended .tbl-wrap / .tbl / .cell-* / .tbl-detail CSS classes
+            - server.js: GET /api/properties returns p.extra; PATCH merges extra via jsonb ||
+            - App.jsx: TABLE_COLS + colVal/colPatch helpers; maxWidth 780→1180; list → table;
+              PropertyRow rewritten as <tr>/<tr> pair; CellEdit component added
 2026-06-03  Add per-property `extra` JSONB field; surface full CSV row in detail view
             - db.js: idempotent ALTER TABLE migration in SCHEMA
             - server.js: slim list SELECT (no p.*); import stores & upserts extra

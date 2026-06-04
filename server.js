@@ -64,7 +64,7 @@ app.get("/api/properties", async (req, res) => {
   const clause = where.length ? `where ${where.join(" and ")}` : "";
   const { rows } = await pool.query(`
     select p.id, p.market_id, p.address, p.owner_name, p.phone, p.email,
-               p.unit_count, p.status, p.active, p.next_follow_up, p.created_at,
+               p.unit_count, p.status, p.active, p.next_follow_up, p.created_at, p.extra,
                m.name as market_name,
       (select to_char(max(touch_date),'YYYY-MM-DD') from touches t where t.property_id = p.id) as last_touch,
       (select channel from touches t where t.property_id = p.id order by touch_date desc, created_at desc limit 1) as last_channel
@@ -98,6 +98,10 @@ app.patch("/api/properties/:id", async (req, res) => {
   const allowed = ["address", "owner_name", "phone", "email", "unit_count", "status", "active", "next_follow_up", "market_id"];
   const sets = [], args = [];
   for (const k of allowed) if (k in req.body) { args.push(req.body[k] === "" ? null : req.body[k]); sets.push(`${k}=$${args.length}`); }
+  if (req.body.extra && typeof req.body.extra === "object" && !Array.isArray(req.body.extra)) {
+    args.push(JSON.stringify(req.body.extra));
+    sets.push(`extra = extra || $${args.length}::jsonb`);
+  }
   if (!sets.length) return res.json({ ok: true });
   args.push(req.params.id);
   await pool.query(`update properties set ${sets.join(", ")} where id=$${args.length}`, args);

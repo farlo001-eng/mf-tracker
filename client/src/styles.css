@@ -23,3 +23,16 @@ input,textarea,select{outline:none}
 .pill{font-family:'IBM Plex Mono',monospace;font-size:11px;border-radius:999px;padding:3px 10px;cursor:pointer;border:1px solid var(--line);background:transparent;color:var(--inkSoft)}
 .truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .modal-bg{position:fixed;inset:0;background:rgba(36,31,24,.45);display:flex;align-items:flex-start;justify-content:center;padding:24px 16px;overflow:auto;z-index:50}
+/* spreadsheet-style table */
+.tbl-wrap{border:1px solid var(--line);border-radius:12px;overflow-x:auto;background:var(--surface)}
+.tbl{width:100%;min-width:880px;border-collapse:collapse;table-layout:fixed;font-size:13px}
+.tbl thead th{position:sticky;top:0;background:var(--surface2);border-bottom:1px solid var(--line);padding:8px 10px;font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--inkSoft);white-space:nowrap;z-index:1}
+.tbl td{border-bottom:1px solid var(--lineSoft);border-right:1px solid var(--lineSoft);padding:0;height:34px}
+.tbl td:last-child{border-right:none}
+.tbl-row:hover>td{background:var(--surface2)}
+.tbl-ctl{text-align:center}
+.cell-exp{background:none;border:none;cursor:pointer;padding:6px;display:inline-flex}
+.cell-view{display:block;width:100%;padding:7px 10px;cursor:text;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cell-input{display:block;width:100%;border:none;background:#fff;padding:6px 9px;font-family:inherit;font-size:13px;color:var(--ink);outline:2px solid var(--rust);outline-offset:-2px}
+.cell-sel{width:100%;border:none;background:transparent;padding:7px 8px;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer}
+.tbl-detail>td{background:var(--surface)}

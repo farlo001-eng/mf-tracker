@@ -21,6 +21,18 @@ const FIELDS = [
   { key: "unit_count", label: "Unit count" },
 ];
 
+const TABLE_COLS = [
+  { field: "Property Name", label: "Property", extra: true, w: 190 },
+  { field: "address", label: "Address", w: 200 },
+  { field: "City", label: "City", extra: true, w: 120 },
+  { field: "unit_count", label: "Units", num: true, w: 70 },
+  { field: "Year Built", label: "Built", extra: true, w: 70 },
+  { field: "status", label: "Status", type: "status", w: 110 },
+  { field: "next_follow_up", label: "Follow-up", type: "date", w: 130 },
+];
+const colVal = (p, c) => (c.extra ? (p.extra?.[c.field] ?? "") : (p[c.field] ?? ""));
+const colPatch = (c, v) => (c.extra ? { extra: { [c.field]: v } } : { [c.field]: v });
+
 const pad = (n) => String(n).padStart(2, "0");
 const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
 const addDays = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
@@ -96,7 +108,7 @@ function Tracker({ onLogout }) {
   const refresh = () => { load(); loadMarkets(); };
 
   return (
-    <div style={{ maxWidth: 780, margin: "0 auto", padding: "24px 16px 60px" }}>
+    <div style={{ maxWidth: 1180, margin: "0 auto", padding: "24px 16px 60px" }}>
       {/* header */}
       <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between" }}>
         <h1 className="display" style={{ fontSize: 30, fontWeight: 600, margin: 0, letterSpacing: "-.02em" }}>Outreach Ledger</h1>
@@ -165,16 +177,30 @@ function Tracker({ onLogout }) {
 
       {adding && <AddForm markets={markets} market={market} onDone={() => { setAdding(false); refresh(); }} onCancel={() => setAdding(false)} />}
 
-      {/* list */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {props.length === 0 && <div style={{ textAlign: "center", color: "var(--inkSoft)", fontSize: 13, padding: "28px 0" }}>
+      {/* table */}
+      {props.length === 0 ? (
+        <div style={{ textAlign: "center", color: "var(--inkSoft)", fontSize: 13, padding: "28px 0" }}>
           {tab === "desk" ? "Your desk is empty. Promote leads from the Warehouse to work them." : "No properties yet — Import a market to get started."}
-        </div>}
-        {props.map((p) => (
-          <PropertyRow key={p.id} p={p} today={today} open={expanded === p.id}
-            onToggle={() => setExpanded(expanded === p.id ? null : p.id)} onChange={refresh} />
-        ))}
-      </div>
+        </div>
+      ) : (
+        <div className="tbl-wrap">
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th style={{ width: 34 }}></th>
+                {TABLE_COLS.map((c) => <th key={c.field} style={{ width: c.w, textAlign: c.num ? "right" : "left" }}>{c.label}</th>)}
+                <th style={{ width: 34 }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {props.map((p) => (
+                <PropertyRow key={p.id} p={p} today={today} open={expanded === p.id}
+                  onToggle={() => setExpanded(expanded === p.id ? null : p.id)} onChange={refresh} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       <div className="mono" style={{ textAlign: "center", color: "var(--muted)", fontSize: 11, marginTop: 26 }}>
         Your data · stored in your own database
@@ -193,96 +219,124 @@ function PropertyRow({ p, today, open, onToggle, onChange }) {
 
   const patch = (body) => api.send(`/api/properties/${p.id}`, "PATCH", body).then(() => { onChange(); if (open) api.get(`/api/properties/${p.id}`).then(setDetail); });
   const logTouch = () => { if (!draft.note.trim()) return; api.send(`/api/properties/${p.id}/touch`, "POST", { touch_date: draft.date, channel: draft.channel, note: draft.note.trim() }).then(() => { setDraft((d) => ({ ...d, note: "" })); api.get(`/api/properties/${p.id}`).then(setDetail); onChange(); }); };
-  const dueDays = daysFromToday(p.next_follow_up);
 
   return (
-    <div className="card" style={{ borderColor: open ? "var(--rust)" : "var(--line)" }}>
-      <button className="row-btn" onClick={onToggle}>
-        {open ? <ChevronDown size={16} style={{ color: "var(--inkSoft)", flexShrink: 0 }} /> : <ChevronRight size={16} style={{ color: "var(--muted)", flexShrink: 0 }} />}
-        <Star size={15} style={{ flexShrink: 0, color: p.active ? "var(--amber)" : "var(--line)", fill: p.active ? "var(--amber)" : "none" }}
-          onClick={(e) => { e.stopPropagation(); patch({ active: !p.active }); }} />
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div className="truncate" style={{ fontWeight: 600, fontSize: 14.5 }}>{p.address}</div>
-          <div className="truncate" style={{ color: "var(--inkSoft)", fontSize: 12 }}>
-            {p.owner_name || "—"}{p.last_touch ? ` · last ${fmtDate(p.last_touch)} (${p.last_channel})` : " · no touches"}
-          </div>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-          {p.next_follow_up && p.status !== "Dead" && <span className="mono" style={{ fontSize: 11, color: dueDays <= 0 ? "var(--rustDeep)" : "var(--inkSoft)" }}>▸ {fmtDate(p.next_follow_up)}</span>}
-          <span className="mono" style={{ fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".04em", color: STATUSES[p.status], border: `1px solid ${STATUSES[p.status]}`, borderRadius: 999, padding: "2px 8px" }}>{p.status}</span>
-        </div>
-      </button>
+    <>
+      <tr className="tbl-row" style={open ? { background: "var(--surface2)" } : undefined}>
+        <td className="tbl-ctl">
+          <Star size={15} style={{ cursor: "pointer", color: p.active ? "var(--amber)" : "var(--line)", fill: p.active ? "var(--amber)" : "none" }}
+            onClick={() => patch({ active: !p.active })} title={p.active ? "On desk" : "Promote to desk"} />
+        </td>
+        {TABLE_COLS.map((c) => (
+          <td key={c.field} style={{ textAlign: c.num ? "right" : "left" }}>
+            {c.type === "status" ? (
+              <select className="cell-sel" value={p.status} onChange={(e) => patch({ status: e.target.value })} style={{ color: STATUSES[p.status] }}>
+                {Object.keys(STATUSES).map((s) => <option key={s} style={{ color: "var(--ink)" }}>{s}</option>)}
+              </select>
+            ) : (
+              <CellEdit value={colVal(p, c)} type={c.type} num={c.num} onSave={(v) => patch(colPatch(c, v))} />
+            )}
+          </td>
+        ))}
+        <td className="tbl-ctl">
+          <button className="cell-exp" onClick={onToggle} title="Details">
+            {open ? <ChevronDown size={16} style={{ color: "var(--inkSoft)" }} /> : <ChevronRight size={16} style={{ color: "var(--muted)" }} />}
+          </button>
+        </td>
+      </tr>
 
       {open && detail && (
-        <div style={{ borderTop: "1px solid var(--lineSoft)", padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
-          <div style={{ fontSize: 13, display: "flex", flexDirection: "column", gap: 8 }}>
-            <div style={{ display: "flex", gap: 8, alignItems: "center", color: "var(--inkSoft)" }}><MapPin size={13} /> {p.address}{p.market_name ? ` · ${p.market_name}` : ""}</div>
-            <Editable icon={<User size={13} />} value={detail.owner_name} ph="Owner name" onSave={(v) => patch({ owner_name: v })} />
-            <Editable icon={<Phone size={13} />} value={detail.phone} ph="Phone" onSave={(v) => patch({ phone: v })} />
-            <Editable icon={<Mail size={13} />} value={detail.email} ph="Email" onSave={(v) => patch({ email: v })} />
-          </div>
-
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-            <select className="in" style={{ width: "auto" }} value={detail.status} onChange={(e) => patch({ status: e.target.value })}>
-              {Object.keys(STATUSES).map((s) => <option key={s}>{s}</option>)}
-            </select>
-            <input className="in" style={{ width: "auto" }} type="date" value={detail.next_follow_up || ""} onChange={(e) => patch({ next_follow_up: e.target.value })} />
-            {[["+3d", 3], ["+1w", 7], ["+2w", 14], ["+1mo", 30]].map(([l, n]) => (
-              <button key={l} className="pill" style={{ color: "var(--teal)" }} onClick={() => patch({ next_follow_up: addDays(n) })}>{l}</button>
-            ))}
-          </div>
-
-          {/* log a touch */}
-          <div style={{ background: "var(--surface2)", border: "1px solid var(--lineSoft)", borderRadius: 10, padding: 12 }}>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
-              {Object.entries(CHANNELS).map(([name, { Icon, color }]) => { const on = draft.channel === name; return (
-                <button key={name} onClick={() => setDraft((d) => ({ ...d, channel: name }))}
-                  style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, borderRadius: 7, padding: "5px 9px", cursor: "pointer",
-                    border: `1px solid ${on ? color : "var(--line)"}`, background: on ? color : "transparent", color: on ? "#fff" : "var(--inkSoft)" }}>
-                  <Icon size={13} /> {name}</button>); })}
-              <input className="in" style={{ width: "auto", marginLeft: "auto" }} type="date" value={draft.date} onChange={(e) => setDraft((d) => ({ ...d, date: e.target.value }))} />
-            </div>
-            <textarea className="in" rows={2} placeholder="Call notes (voicemail, spoke 5 min, send comps…)" value={draft.note} onChange={(e) => setDraft((d) => ({ ...d, note: e.target.value }))} />
-            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
-              <button className="btn btn-ink" disabled={!draft.note.trim()} style={{ opacity: draft.note.trim() ? 1 : .5 }} onClick={logTouch}>Log touch</button>
-            </div>
-          </div>
-
-          {detail.touches?.length > 0 && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {detail.touches.map((e) => { const C = CHANNELS[e.channel] || CHANNELS.Call; return (
-                <div key={e.id} style={{ display: "flex", gap: 12, fontSize: 13 }}>
-                  <div className="mono" style={{ width: 64, flexShrink: 0, fontSize: 11, color: "var(--inkSoft)", paddingTop: 2 }}>{fmtDate(e.touch_date)}</div>
-                  <div style={{ flexShrink: 0, paddingTop: 2 }}><C.Icon size={14} style={{ color: C.color }} /></div>
-                  <div>{e.note}</div>
-                </div>); })}
-            </div>
-          )}
-
-          {detail.extra && Object.keys(detail.extra).length > 0 && (
-            <details style={{ border: "1px solid var(--lineSoft)", borderRadius: 10, padding: "10px 12px" }}>
-              <summary style={{ cursor: "pointer", fontSize: 11, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--inkSoft)" }}>All property data</summary>
-              <div style={{ display: "grid", gridTemplateColumns: "minmax(130px, 38%) 1fr", gap: "4px 14px", marginTop: 12, fontSize: 13 }}>
-                {Object.entries(detail.extra)
-                  .filter(([, v]) => v != null && String(v).trim() !== "")
-                  .map(([k, v]) => (
-                    <React.Fragment key={k}>
-                      <div style={{ color: "var(--muted)" }}>{k}</div>
-                      <div style={{ color: "var(--ink)", wordBreak: "break-word" }}>{String(v)}</div>
-                    </React.Fragment>
-                  ))}
+        <tr className="tbl-detail">
+          <td colSpan={TABLE_COLS.length + 2} style={{ padding: 0 }}>
+            <div style={{ borderTop: "2px solid var(--rust)", padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
+              <div style={{ fontSize: 13, display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", color: "var(--inkSoft)" }}><MapPin size={13} /> {p.address}{p.market_name ? ` · ${p.market_name}` : ""}</div>
+                <Editable icon={<User size={13} />} value={detail.owner_name} ph="Owner name" onSave={(v) => patch({ owner_name: v })} />
+                <Editable icon={<Phone size={13} />} value={detail.phone} ph="Phone" onSave={(v) => patch({ phone: v })} />
+                <Editable icon={<Mail size={13} />} value={detail.email} ph="Email" onSave={(v) => patch({ email: v })} />
               </div>
-            </details>
-          )}
 
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <button className="link" onClick={() => patch({ active: !detail.active })}>
-              <Star size={13} /> {detail.active ? "Remove from desk" : "Promote to desk"}
-            </button>
-            <button className="link" onClick={() => api.send(`/api/properties/${p.id}`, "DELETE").then(() => { onChange(); })}><Trash2 size={13} /> Delete</button>
-          </div>
-        </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                <select className="in" style={{ width: "auto" }} value={detail.status} onChange={(e) => patch({ status: e.target.value })}>
+                  {Object.keys(STATUSES).map((s) => <option key={s}>{s}</option>)}
+                </select>
+                <input className="in" style={{ width: "auto" }} type="date" value={detail.next_follow_up || ""} onChange={(e) => patch({ next_follow_up: e.target.value })} />
+                {[["+3d", 3], ["+1w", 7], ["+2w", 14], ["+1mo", 30]].map(([l, n]) => (
+                  <button key={l} className="pill" style={{ color: "var(--teal)" }} onClick={() => patch({ next_follow_up: addDays(n) })}>{l}</button>
+                ))}
+              </div>
+
+              <div style={{ background: "var(--surface2)", border: "1px solid var(--lineSoft)", borderRadius: 10, padding: 12 }}>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
+                  {Object.entries(CHANNELS).map(([name, { Icon, color }]) => { const on = draft.channel === name; return (
+                    <button key={name} onClick={() => setDraft((d) => ({ ...d, channel: name }))}
+                      style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, borderRadius: 7, padding: "5px 9px", cursor: "pointer",
+                        border: `1px solid ${on ? color : "var(--line)"}`, background: on ? color : "transparent", color: on ? "#fff" : "var(--inkSoft)" }}>
+                      <Icon size={13} /> {name}</button>); })}
+                  <input className="in" style={{ width: "auto", marginLeft: "auto" }} type="date" value={draft.date} onChange={(e) => setDraft((d) => ({ ...d, date: e.target.value }))} />
+                </div>
+                <textarea className="in" rows={2} placeholder="Call notes (voicemail, spoke 5 min, send comps…)" value={draft.note} onChange={(e) => setDraft((d) => ({ ...d, note: e.target.value }))} />
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
+                  <button className="btn btn-ink" disabled={!draft.note.trim()} style={{ opacity: draft.note.trim() ? 1 : .5 }} onClick={logTouch}>Log touch</button>
+                </div>
+              </div>
+
+              {detail.touches?.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {detail.touches.map((e) => { const C = CHANNELS[e.channel] || CHANNELS.Call; return (
+                    <div key={e.id} style={{ display: "flex", gap: 12, fontSize: 13 }}>
+                      <div className="mono" style={{ width: 64, flexShrink: 0, fontSize: 11, color: "var(--inkSoft)", paddingTop: 2 }}>{fmtDate(e.touch_date)}</div>
+                      <div style={{ flexShrink: 0, paddingTop: 2 }}><C.Icon size={14} style={{ color: C.color }} /></div>
+                      <div>{e.note}</div>
+                    </div>); })}
+                </div>
+              )}
+
+              {detail.extra && Object.keys(detail.extra).length > 0 && (
+                <details style={{ border: "1px solid var(--lineSoft)", borderRadius: 10, padding: "10px 12px" }}>
+                  <summary style={{ cursor: "pointer", fontSize: 11, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--inkSoft)" }}>All property data</summary>
+                  <div style={{ display: "grid", gridTemplateColumns: "minmax(130px, 38%) 1fr", gap: "4px 14px", marginTop: 12, fontSize: 13 }}>
+                    {Object.entries(detail.extra)
+                      .filter(([, v]) => v != null && String(v).trim() !== "")
+                      .map(([k, v]) => (
+                        <React.Fragment key={k}>
+                          <div style={{ color: "var(--muted)" }}>{k}</div>
+                          <div style={{ color: "var(--ink)", wordBreak: "break-word" }}>{String(v)}</div>
+                        </React.Fragment>
+                      ))}
+                  </div>
+                </details>
+              )}
+
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <button className="link" onClick={() => patch({ active: !detail.active })}>
+                  <Star size={13} /> {detail.active ? "Remove from desk" : "Promote to desk"}
+                </button>
+                <button className="link" onClick={() => api.send(`/api/properties/${p.id}`, "DELETE").then(() => { onChange(); })}><Trash2 size={13} /> Delete</button>
+              </div>
+            </div>
+          </td>
+        </tr>
       )}
+    </>
+  );
+}
+
+function CellEdit({ value, type, num, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const [v, setV] = useState(value ?? "");
+  useEffect(() => setV(value ?? ""), [value]);
+  const commit = () => { onSave(String(v).trim()); setEditing(false); };
+  if (editing || type === "date") {
+    return (
+      <input className="cell-input" autoFocus={editing} type={type === "date" ? "date" : num ? "number" : "text"}
+        value={v} onChange={(e) => setV(e.target.value)} onBlur={commit}
+        onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") { setV(value ?? ""); setEditing(false); } }} />
+    );
+  }
+  return (
+    <div className="cell-view" onClick={() => setEditing(true)} title="Click to edit">
+      {value !== "" && value != null ? String(value) : <span style={{ color: "var(--muted)" }}>—</span>}
     </div>
   );
 }

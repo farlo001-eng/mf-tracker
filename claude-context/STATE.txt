@@ -1,19 +1,30 @@
 ## Current State (2026-06-03)
 
-Per-property `extra` JSONB column added. The full imported CSV row is now stored in
-`properties.extra` and surfaced in the property detail view under a collapsible
-"All property data" section. The condensed list view is unchanged.
+The property list has been replaced with an inline-editable spreadsheet-style table.
+Cells in the table (Property Name, Address, City, Units, Year Built, Status, Follow-up)
+can be edited in place; clicking a cell activates an input. Status is a dropdown.
+Owner/phone/email remain in the expandable detail row only.
+
+### Architecture
+- TABLE_COLS defines the 7 visible columns; `extra: true` columns read/write from
+  `p.extra` (JSONB) via the `colVal` / `colPatch` helpers.
+- CellEdit handles click-to-edit for text, number, and date cell types.
+- PropertyRow now renders as a React Fragment with two `<tr>` elements: the data row
+  and a collapsible detail row spanning all columns.
+- PATCH /api/properties/:id merges `extra` using `extra || $N::jsonb` (additive merge,
+  not a full overwrite).
+- GET /api/properties returns `p.extra` so table columns backed by extra are populated
+  without an extra fetch.
 
 ### What was done
-- db.js: Added `alter table properties add column if not exists extra jsonb` migration
-  to SCHEMA — runs idempotently on boot via ensureSchema, migrates Railway DB automatically.
-- server.js: GET /api/properties now selects explicit columns (no `p.*`) to keep the
-  list payload lean. POST /api/import stores `r.extra` (the full raw CSV row object) as
-  JSONB; upsert also updates `extra` on conflict.
-- client/src/App.jsx: ImportModal sets `o.extra = r` so the raw row travels to the
-  server. PropertyRow detail view renders a `<details>` disclosure with all non-empty
-  key/value pairs from `detail.extra`.
+- styles.css: appended .tbl-wrap, .tbl, .tbl-row, .tbl-ctl, .tbl-detail, .cell-view,
+  .cell-input, .cell-sel, .cell-exp classes.
+- server.js: GET /api/properties select now includes p.extra; PATCH handler merges
+  incoming extra object with existing JSONB using the || operator.
+- App.jsx: TABLE_COLS array + colVal/colPatch helpers added after FIELDS; Tracker
+  container maxWidth widened to 1180; list div replaced with tbl-wrap/table; PropertyRow
+  rewritten as <tr> pair; CellEdit component inserted before Editable.
 
 ### Next step
-Re-import any existing markets to populate `extra` for pre-existing rows (rows imported
-before this change will have `extra = {}`). No other pending work.
+No pending work. Consider adding column sorting or a column visibility picker if the
+table grows.
