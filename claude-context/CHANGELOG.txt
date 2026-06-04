@@ -1,0 +1,4 @@
+2026-06-03  Add per-property `extra` JSONB field; surface full CSV row in detail view
+            - db.js: idempotent ALTER TABLE migration in SCHEMA
+            - server.js: slim list SELECT (no p.*); import stores & upserts extra
+            - App.jsx: payload includes raw row as extra; detail shows "All property data" disclosure

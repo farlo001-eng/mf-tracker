@@ -63,7 +63,9 @@ app.get("/api/properties", async (req, res) => {
   if (q) { args.push(`%${q}%`); where.push(`(p.address ilike $${args.length} or p.owner_name ilike $${args.length} or p.phone ilike $${args.length})`); }
   const clause = where.length ? `where ${where.join(" and ")}` : "";
   const { rows } = await pool.query(`
-    select p.*, m.name as market_name,
+    select p.id, p.market_id, p.address, p.owner_name, p.phone, p.email,
+               p.unit_count, p.status, p.active, p.next_follow_up, p.created_at,
+               m.name as market_name,
       (select to_char(max(touch_date),'YYYY-MM-DD') from touches t where t.property_id = p.id) as last_touch,
       (select channel from touches t where t.property_id = p.id order by touch_date desc, created_at desc limit 1) as last_channel
     from properties p left join markets m on m.id = p.market_id
@@ -131,13 +133,15 @@ app.post("/api/import", async (req, res) => {
     for (const r of rows) {
       if (!r.address || !String(r.address).trim()) continue;
       await client.query(
-        `insert into properties (id, market_id, address, owner_name, phone, email, unit_count)
-         values ($1,$2,$3,$4,$5,$6,$7)
+        `insert into properties (id, market_id, address, owner_name, phone, email, unit_count, extra)
+         values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)
          on conflict (market_id, lower(address))
          do update set owner_name=excluded.owner_name, phone=excluded.phone,
-                       email=excluded.email, unit_count=excluded.unit_count`,
+                       email=excluded.email, unit_count=excluded.unit_count,
+                       extra=excluded.extra`,
         [uid(), marketId || null, String(r.address).trim(), r.owner_name || "", r.phone || "",
-         r.email || "", Number.isFinite(+r.unit_count) && r.unit_count !== "" ? +r.unit_count : null]
+         r.email || "", Number.isFinite(+r.unit_count) && r.unit_count !== "" ? +r.unit_count : null,
+         JSON.stringify(r.extra && typeof r.extra === "object" ? r.extra : {})]
       );
       n++;
     }

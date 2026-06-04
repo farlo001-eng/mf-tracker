@@ -1,0 +1,26 @@
+## File Map (2026-06-03)
+
+### Root
+  package.json         — Node project manifest; scripts: build (vite), start (node server.js)
+  package-lock.json    — Lockfile
+  server.js            — Express API server; auth, markets, properties CRUD, bulk import
+  db.js                — pg Pool, uid(), ensureSchema() — runs SCHEMA on boot
+  vite.config.js       — Vite config (proxies /api to localhost:3000 in dev)
+  railway.json         — Railway deployment config
+  .gitignore
+  README.md
+
+### db/
+  schema.sql           — Reference schema (not used at runtime; db.js SCHEMA is authoritative)
+
+### client/
+  index.html           — Vite entry HTML
+  src/
+    main.jsx           — React entry point
+    App.jsx            — Full single-file React app (Login, Tracker, PropertyRow, ImportModal, …)
+    styles.css         — CSS custom properties + utility classes
+
+### claude-context/  (meta — not deployed)
+  STATE.txt            — Current work state and next steps
+  FILEMAP.txt          — This file
+  CHANGELOG.txt        — Dated change log

@@ -259,6 +259,22 @@ function PropertyRow({ p, today, open, onToggle, onChange }) {
             </div>
           )}
 
+          {detail.extra && Object.keys(detail.extra).length > 0 && (
+            <details style={{ border: "1px solid var(--lineSoft)", borderRadius: 10, padding: "10px 12px" }}>
+              <summary style={{ cursor: "pointer", fontSize: 11, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--inkSoft)" }}>All property data</summary>
+              <div style={{ display: "grid", gridTemplateColumns: "minmax(130px, 38%) 1fr", gap: "4px 14px", marginTop: 12, fontSize: 13 }}>
+                {Object.entries(detail.extra)
+                  .filter(([, v]) => v != null && String(v).trim() !== "")
+                  .map(([k, v]) => (
+                    <React.Fragment key={k}>
+                      <div style={{ color: "var(--muted)" }}>{k}</div>
+                      <div style={{ color: "var(--ink)", wordBreak: "break-word" }}>{String(v)}</div>
+                    </React.Fragment>
+                  ))}
+              </div>
+            </details>
+          )}
+
           <div style={{ display: "flex", justifyContent: "space-between" }}>
             <button className="link" onClick={() => patch({ active: !detail.active })}>
               <Star size={13} /> {detail.active ? "Remove from desk" : "Promote to desk"}
@@ -349,6 +365,7 @@ function ImportModal({ markets, onClose, onDone }) {
     const payload = rows.map((r) => {
       const o = {};
       for (const f of FIELDS) o[f.key] = map[f.key] ? r[map[f.key]] : "";
+      o.extra = r;
       return o;
     }).filter((o) => o.address && String(o.address).trim());
     const body = marketChoice === "__new" ? { marketName: marketName.trim() || "Imported market", rows: payload } : { marketId: existingMarket, rows: payload };
