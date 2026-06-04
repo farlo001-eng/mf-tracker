@@ -64,7 +64,9 @@ app.get("/api/properties", async (req, res) => {
   const clause = where.length ? `where ${where.join(" and ")}` : "";
   const { rows } = await pool.query(`
     select p.id, p.market_id, p.address, p.owner_name, p.phone, p.email,
-               p.unit_count, p.status, p.active, p.next_follow_up, p.created_at, p.extra,
+               p.unit_count, p.status, p.active,
+               to_char(p.next_follow_up, 'YYYY-MM-DD') as next_follow_up,
+               p.created_at, p.extra,
                m.name as market_name,
       (select to_char(max(touch_date),'YYYY-MM-DD') from touches t where t.property_id = p.id) as last_touch,
       (select channel from touches t where t.property_id = p.id order by touch_date desc, created_at desc limit 1) as last_channel
@@ -86,7 +88,7 @@ app.post("/api/properties", async (req, res) => {
 });
 
 app.get("/api/properties/:id", async (req, res) => {
-  const { rows } = await pool.query(`select * from properties where id=$1`, [req.params.id]);
+  const { rows } = await pool.query(`select *, to_char(next_follow_up,'YYYY-MM-DD') as next_follow_up from properties where id=$1`, [req.params.id]);
   if (!rows[0]) return res.status(404).json({ error: "not found" });
   const t = await pool.query(
     `select id, to_char(touch_date,'YYYY-MM-DD') as touch_date, channel, note
@@ -95,7 +97,7 @@ app.get("/api/properties/:id", async (req, res) => {
 });
 
 app.patch("/api/properties/:id", async (req, res) => {
-  const allowed = ["address", "owner_name", "phone", "email", "unit_count", "status", "active", "next_follow_up", "market_id"];
+  const allowed = ["address", "owner_name", "phone", "email", "unit_count", "status", "active", "next_follow_up", "market_id", "notes"];
   const sets = [], args = [];
   for (const k of allowed) if (k in req.body) { args.push(req.body[k] === "" ? null : req.body[k]); sets.push(`${k}=$${args.length}`); }
   if (req.body.extra && typeof req.body.extra === "object" && !Array.isArray(req.body.extra)) {

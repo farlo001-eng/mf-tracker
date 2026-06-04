@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import Papa from "papaparse";
 import {
   Phone, Mail, MessageSquare, Send, Plus, Search, X, Trash2, Clock, Check,
-  ChevronDown, ChevronRight, MapPin, User, Upload, Star, LogOut, Building2,
+  ChevronDown, ChevronRight, MapPin, User, Upload, Star, LogOut, Building2, Columns,
 } from "lucide-react";
 
 /* ---------------- constants & helpers ---------------- */
@@ -21,15 +21,19 @@ const FIELDS = [
   { key: "unit_count", label: "Unit count" },
 ];
 
-const TABLE_COLS = [
-  { field: "Property Name", label: "Property", extra: true, w: 190 },
-  { field: "address", label: "Address", w: 200 },
-  { field: "City", label: "City", extra: true, w: 120 },
-  { field: "unit_count", label: "Units", num: true, w: 70 },
-  { field: "Year Built", label: "Built", extra: true, w: 70 },
-  { field: "status", label: "Status", type: "status", w: 110 },
-  { field: "next_follow_up", label: "Follow-up", type: "date", w: 130 },
-];
+// Core columns the table renders natively; any other key is treated as an editable
+// text field read from property.extra[key]. Users pick which columns show (Columns button).
+const CORE_COLS = {
+  address:        { label: "Address", w: 200 },
+  owner_name:     { label: "Owner", w: 170 },
+  phone:          { label: "Phone", w: 130 },
+  email:          { label: "Email", w: 160 },
+  unit_count:     { label: "Units", w: 70, num: true },
+  status:         { label: "Status", w: 110, type: "status" },
+  next_follow_up: { label: "Follow-up", w: 130, type: "date" },
+};
+const DEFAULT_COLS = ["Property Name", "address", "City", "unit_count", "Year Built", "status", "next_follow_up"];
+const colDesc = (key) => (key in CORE_COLS ? { field: key, ...CORE_COLS[key] } : { field: key, label: key, extra: true, w: 150 });
 const colVal = (p, c) => (c.extra ? (p.extra?.[c.field] ?? "") : (p[c.field] ?? ""));
 const colPatch = (c, v) => (c.extra ? { extra: { [c.field]: v } } : { [c.field]: v });
 
@@ -88,6 +92,14 @@ function Tracker({ onLogout }) {
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
 
+  const [showCols, setShowCols] = useState(false);
+  const [cols, setCols] = useState(() => {
+    try { const s = JSON.parse(localStorage.getItem("mf_cols")); if (Array.isArray(s) && s.length) return s; } catch {}
+    return DEFAULT_COLS;
+  });
+  useEffect(() => { try { localStorage.setItem("mf_cols", JSON.stringify(cols)); } catch {} }, [cols]);
+  const toggleCol = (key) => setCols((cur) => (cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key]));
+
   const loadMarkets = useCallback(() => api.get("/api/markets").then(setMarkets).catch(() => {}), []);
   const load = useCallback(() => {
     const p = new URLSearchParams();
@@ -106,6 +118,14 @@ function Tracker({ onLogout }) {
     .sort((a, b) => (a.next_follow_up || "").localeCompare(b.next_follow_up || ""));
 
   const refresh = () => { load(); loadMarkets(); };
+
+  const extraKeys = useMemo(() => {
+    const set = new Set();
+    props.forEach((p) => p.extra && Object.keys(p.extra).forEach((k) => set.add(k)));
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [props]);
+  const allKeys = [...Object.keys(CORE_COLS), ...extraKeys.filter((k) => !(k in CORE_COLS))];
+  const visibleCols = cols.map(colDesc);
 
   return (
     <div style={{ maxWidth: 1180, margin: "0 auto", padding: "24px 16px 60px" }}>
@@ -164,6 +184,22 @@ function Tracker({ onLogout }) {
         <button className="btn" style={{ background: "var(--surface)", border: "1px solid var(--line)", color: "var(--ink)", display: "flex", alignItems: "center", gap: 6 }} onClick={() => setAdding((v) => !v)}>
           <Plus size={16} /> Add
         </button>
+        <div className="colbtn">
+          <button className="btn" style={{ background: "var(--surface)", border: "1px solid var(--line)", color: "var(--ink)", display: "flex", alignItems: "center", gap: 6 }} onClick={() => setShowCols((v) => !v)}>
+            <Columns size={16} /> Columns
+          </button>
+          {showCols && (
+            <div className="colpop" onMouseLeave={() => setShowCols(false)}>
+              <div className="mono" style={{ fontSize: 10.5, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--muted)", padding: "2px 6px 6px" }}>Show columns</div>
+              {allKeys.map((k) => (
+                <label key={k}>
+                  <input type="checkbox" checked={cols.includes(k)} onChange={() => toggleCol(k)} />
+                  {k in CORE_COLS ? CORE_COLS[k].label : k}
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* status pills */}
@@ -188,13 +224,13 @@ function Tracker({ onLogout }) {
             <thead>
               <tr>
                 <th style={{ width: 34 }}></th>
-                {TABLE_COLS.map((c) => <th key={c.field} style={{ width: c.w, textAlign: c.num ? "right" : "left" }}>{c.label}</th>)}
+                {visibleCols.map((c) => <th key={c.field} style={{ width: c.w, textAlign: c.num ? "right" : "left" }}>{c.label}</th>)}
                 <th style={{ width: 34 }}></th>
               </tr>
             </thead>
             <tbody>
               {props.map((p) => (
-                <PropertyRow key={p.id} p={p} today={today} open={expanded === p.id}
+                <PropertyRow key={p.id} p={p} cols={visibleCols} today={today} open={expanded === p.id}
                   onToggle={() => setExpanded(expanded === p.id ? null : p.id)} onChange={refresh} />
               ))}
             </tbody>
@@ -212,7 +248,7 @@ function Tracker({ onLogout }) {
 }
 
 /* ---------------- property row + detail ---------------- */
-function PropertyRow({ p, today, open, onToggle, onChange }) {
+function PropertyRow({ p, cols, today, open, onToggle, onChange }) {
   const [detail, setDetail] = useState(null);
   const [draft, setDraft] = useState({ channel: "Call", note: "", date: today });
   useEffect(() => { if (open) api.get(`/api/properties/${p.id}`).then(setDetail); else setDetail(null); }, [open, p.id]);
@@ -227,7 +263,7 @@ function PropertyRow({ p, today, open, onToggle, onChange }) {
           <Star size={15} style={{ cursor: "pointer", color: p.active ? "var(--amber)" : "var(--line)", fill: p.active ? "var(--amber)" : "none" }}
             onClick={() => patch({ active: !p.active })} title={p.active ? "On desk" : "Promote to desk"} />
         </td>
-        {TABLE_COLS.map((c) => (
+        {cols.map((c) => (
           <td key={c.field} style={{ textAlign: c.num ? "right" : "left" }}>
             {c.type === "status" ? (
               <select className="cell-sel" value={p.status} onChange={(e) => patch({ status: e.target.value })} style={{ color: STATUSES[p.status] }}>
@@ -247,7 +283,7 @@ function PropertyRow({ p, today, open, onToggle, onChange }) {
 
       {open && detail && (
         <tr className="tbl-detail">
-          <td colSpan={TABLE_COLS.length + 2} style={{ padding: 0 }}>
+          <td colSpan={cols.length + 2} style={{ padding: 0 }}>
             <div style={{ borderTop: "2px solid var(--rust)", padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
               <div style={{ fontSize: 13, display: "flex", flexDirection: "column", gap: 8 }}>
                 <div style={{ display: "flex", gap: 8, alignItems: "center", color: "var(--inkSoft)" }}><MapPin size={13} /> {p.address}{p.market_name ? ` · ${p.market_name}` : ""}</div>
@@ -265,6 +301,8 @@ function PropertyRow({ p, today, open, onToggle, onChange }) {
                   <button key={l} className="pill" style={{ color: "var(--teal)" }} onClick={() => patch({ next_follow_up: addDays(n) })}>{l}</button>
                 ))}
               </div>
+
+              <NotesBox value={detail.notes} onSave={(v) => patch({ notes: v })} />
 
               <div style={{ background: "var(--surface2)", border: "1px solid var(--lineSoft)", borderRadius: 10, padding: 12 }}>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
@@ -300,8 +338,9 @@ function PropertyRow({ p, today, open, onToggle, onChange }) {
                       .filter(([, v]) => v != null && String(v).trim() !== "")
                       .map(([k, v]) => (
                         <React.Fragment key={k}>
-                          <div style={{ color: "var(--muted)" }}>{k}</div>
-                          <div style={{ color: "var(--ink)", wordBreak: "break-word" }}>{String(v)}</div>
+                          <div style={{ color: "var(--muted)", alignSelf: "center" }}>{k}</div>
+                          <input className="in" defaultValue={String(v)}
+                            onBlur={(e) => { if (e.target.value !== String(v)) patch({ extra: { [k]: e.target.value } }); }} />
                         </React.Fragment>
                       ))}
                   </div>
@@ -319,6 +358,18 @@ function PropertyRow({ p, today, open, onToggle, onChange }) {
         </tr>
       )}
     </>
+  );
+}
+
+function NotesBox({ value, onSave }) {
+  const [v, setV] = useState(value || "");
+  useEffect(() => setV(value || ""), [value]);
+  return (
+    <div>
+      <div className="mono" style={{ fontSize: 11, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--inkSoft)", marginBottom: 6 }}>Notes</div>
+      <textarea className="in" rows={3} placeholder="General notes about this property…" value={v}
+        onChange={(e) => setV(e.target.value)} onBlur={() => { if ((value || "") !== v) onSave(v); }} />
+    </div>
   );
 }
 

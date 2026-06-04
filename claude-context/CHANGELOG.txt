@@ -1,3 +1,10 @@
+2026-06-04  Notes field, column picker, date fix, scrollable table
+            - db.js: add notes text column migration (idempotent)
+            - server.js: to_char date formatting for next_follow_up in list + detail; notes in PATCH allowed list
+            - styles.css: tbl-wrap gets max-height:68vh + overflow:auto; column picker .colbtn/.colpop CSS
+            - App.jsx: useMemo import; Columns icon; CORE_COLS/DEFAULT_COLS/colDesc replaces TABLE_COLS;
+              column visibility picker with localStorage; extraKeys/allKeys/visibleCols in Tracker;
+              PropertyRow accepts cols prop; NotesBox component; "All property data" values now inline-editable
 2026-06-03  Replace card list with inline-editable spreadsheet table
             - styles.css: appended .tbl-wrap / .tbl / .cell-* / .tbl-detail CSS classes
             - server.js: GET /api/properties returns p.extra; PATCH merges extra via jsonb ||

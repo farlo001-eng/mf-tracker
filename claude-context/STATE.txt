@@ -1,30 +1,32 @@
-## Current State (2026-06-03)
+## Current State (2026-06-04)
 
-The property list has been replaced with an inline-editable spreadsheet-style table.
-Cells in the table (Property Name, Address, City, Units, Year Built, Status, Follow-up)
-can be edited in place; clicking a cell activates an input. Status is a dropdown.
-Owner/phone/email remain in the expandable detail row only.
+Four improvements landed on top of the spreadsheet table:
 
-### Architecture
-- TABLE_COLS defines the 7 visible columns; `extra: true` columns read/write from
-  `p.extra` (JSONB) via the `colVal` / `colPatch` helpers.
-- CellEdit handles click-to-edit for text, number, and date cell types.
-- PropertyRow now renders as a React Fragment with two `<tr>` elements: the data row
-  and a collapsible detail row spanning all columns.
-- PATCH /api/properties/:id merges `extra` using `extra || $N::jsonb` (additive merge,
-  not a full overwrite).
-- GET /api/properties returns `p.extra` so table columns backed by extra are populated
-  without an extra fetch.
+1. **Notes field** — `properties.notes TEXT` column added via idempotent migration.
+   Surfaced as a `NotesBox` textarea in the property detail row (saves on blur).
 
-### What was done
-- styles.css: appended .tbl-wrap, .tbl, .tbl-row, .tbl-ctl, .tbl-detail, .cell-view,
-  .cell-input, .cell-sel, .cell-exp classes.
-- server.js: GET /api/properties select now includes p.extra; PATCH handler merges
-  incoming extra object with existing JSONB using the || operator.
-- App.jsx: TABLE_COLS array + colVal/colPatch helpers added after FIELDS; Tracker
-  container maxWidth widened to 1180; list div replaced with tbl-wrap/table; PropertyRow
-  rewritten as <tr> pair; CellEdit component inserted before Editable.
+2. **Column visibility picker** — "Columns" button in the toolbar opens a floating
+   checklist of all core + extra keys. Selection is persisted in `localStorage` under
+   `mf_cols`. `visibleCols` (computed from `cols.map(colDesc)`) is passed down as a
+   prop to `PropertyRow`, replacing the old static `TABLE_COLS` constant.
+
+3. **Follow-up date fix** — `next_follow_up` is now formatted as `YYYY-MM-DD` in both
+   the list query (`to_char(p.next_follow_up,'YYYY-MM-DD')`) and the detail query,
+   so date inputs always receive a clean ISO string regardless of the Postgres client
+   timezone setting.
+
+4. **Scrollable table** — `.tbl-wrap` now has `max-height: 68vh` and `overflow: auto`
+   so the sticky header stays visible while scrolling long lists.
+
+### Architecture notes
+- `CORE_COLS` object maps column key → `{label, w, type?, num?}`.
+- `colDesc(key)` converts a key string to a column descriptor, treating unknown keys
+  as `extra: true` (read from `p.extra[key]`).
+- `extraKeys` is derived via `useMemo` from the current `props` array — populated once
+  properties with `extra` data are loaded.
+- "All property data" values are now `<input>` fields that PATCH on blur via
+  `{ extra: { [k]: newValue } }` (additive merge).
 
 ### Next step
-No pending work. Consider adding column sorting or a column visibility picker if the
-table grows.
+No pending work. Possible future additions: column reordering via drag, sorting by
+column header click, or bulk-status update.
