@@ -1,3 +1,8 @@
+2026-06-04  Replace inline table-row detail with portal modal overlay
+            - styles.css: .detail-modal / .detail-head / .detail-body CSS appended
+            - App.jsx: createPortal import; Escape-to-close handler; inline tbl-detail tr
+              replaced with createPortal(modal-bg > card.detail-modal, document.body);
+              loading state shown while detail fetches; Delete now calls onToggle before onChange
 2026-06-04  Notes field, column picker, date fix, scrollable table
             - db.js: add notes text column migration (idempotent)
             - server.js: to_char date formatting for next_follow_up in list + detail; notes in PATCH allowed list

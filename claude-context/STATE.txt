@@ -1,32 +1,39 @@
 ## Current State (2026-06-04)
 
-Four improvements landed on top of the spreadsheet table:
+The property detail is now a focused modal overlay rendered via `createPortal` into
+`document.body`, completely decoupled from the scrollable table grid.
 
-1. **Notes field** — `properties.notes TEXT` column added via idempotent migration.
-   Surfaced as a `NotesBox` textarea in the property detail row (saves on blur).
+### How the modal works
+- Clicking the expand chevron in any table row sets `expanded` in `Tracker`, which
+  passes `open={true}` down to that `PropertyRow`.
+- `PropertyRow` renders a `createPortal(...)` targeting `document.body` when `open`
+  is true. While the detail API call is in flight it shows a "Loading…" state; once
+  resolved it renders the full detail body.
+- Clicking the backdrop (`modal-bg`) or the X button calls `onToggle` to close.
+- Pressing Escape also closes via a `window.addEventListener("keydown")` effect
+  that is torn down when the row closes.
+- The table row itself no longer has a second `<tr>` sibling; the `<>` fragment now
+  contains only the data row.
 
-2. **Column visibility picker** — "Columns" button in the toolbar opens a floating
-   checklist of all core + extra keys. Selection is persisted in `localStorage` under
-   `mf_cols`. `visibleCols` (computed from `cols.map(colDesc)`) is passed down as a
-   prop to `PropertyRow`, replacing the old static `TABLE_COLS` constant.
+### Layout structure
+```
+.modal-bg (fixed overlay, z-index 50)
+  └── .card.detail-modal (720px, max-height 88vh, flex column)
+        ├── .detail-head (sticky header — property name, address, X button)
+        └── .detail-body (scrollable, flex column, gap 14)
+              ├── Editable fields (owner, phone, email)
+              ├── Status / follow-up / quick-date pills
+              ├── NotesBox
+              ├── Touch logger
+              ├── Touch history
+              └── All property data (expandable)
+```
 
-3. **Follow-up date fix** — `next_follow_up` is now formatted as `YYYY-MM-DD` in both
-   the list query (`to_char(p.next_follow_up,'YYYY-MM-DD')`) and the detail query,
-   so date inputs always receive a clean ISO string regardless of the Postgres client
-   timezone setting.
-
-4. **Scrollable table** — `.tbl-wrap` now has `max-height: 68vh` and `overflow: auto`
-   so the sticky header stays visible while scrolling long lists.
-
-### Architecture notes
-- `CORE_COLS` object maps column key → `{label, w, type?, num?}`.
-- `colDesc(key)` converts a key string to a column descriptor, treating unknown keys
-  as `extra: true` (read from `p.extra[key]`).
-- `extraKeys` is derived via `useMemo` from the current `props` array — populated once
-  properties with `extra` data are loaded.
-- "All property data" values are now `<input>` fields that PATCH on blur via
-  `{ extra: { [k]: newValue } }` (additive merge).
+### Files changed
+- `client/src/styles.css` — `.detail-modal`, `.detail-head`, `.detail-body` appended
+- `client/src/App.jsx` — `createPortal` import; Escape handler useEffect; inline
+  `tbl-detail` tr replaced with portal modal
 
 ### Next step
-No pending work. Possible future additions: column reordering via drag, sorting by
-column header click, or bulk-status update.
+No pending work. Possible additions: animated open/close, keyboard navigation between
+rows (← → arrows to move to prev/next property).
