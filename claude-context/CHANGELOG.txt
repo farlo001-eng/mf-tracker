@@ -1,3 +1,7 @@
+2026-06-04  Add drag-to-reorder for table columns
+            - App.jsx: useRef added; dragCol ref + moveCol splice helper in Tracker;
+              <th> elements get draggable + onDragStart/onDragOver/onDrop handlers
+            - styles.css: th[draggable]:active sets cursor:grabbing + rust color
 2026-06-04  Replace inline table-row detail with portal modal overlay
             - styles.css: .detail-modal / .detail-head / .detail-body CSS appended
             - App.jsx: createPortal import; Escape-to-close handler; inline tbl-detail tr

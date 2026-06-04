@@ -34,6 +34,12 @@ The property detail is now a focused modal overlay rendered via `createPortal` i
 - `client/src/App.jsx` — `createPortal` import; Escape handler useEffect; inline
   `tbl-detail` tr replaced with portal modal
 
+### Column reordering
+Columns can be dragged to reorder by dragging a header cell. A `dragCol` ref holds the
+field key of the column being dragged; `moveCol(from, to)` splices `cols` state in place
+and persists to localStorage via the existing `useEffect`. The `:active` CSS rule gives
+visual feedback (grabbing cursor + rust color) while dragging.
+
 ### Next step
 No pending work. Possible additions: animated open/close, keyboard navigation between
 rows (← → arrows to move to prev/next property).

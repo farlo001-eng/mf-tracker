@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import Papa from "papaparse";
 import {
@@ -100,6 +100,17 @@ function Tracker({ onLogout }) {
   });
   useEffect(() => { try { localStorage.setItem("mf_cols", JSON.stringify(cols)); } catch {} }, [cols]);
   const toggleCol = (key) => setCols((cur) => (cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key]));
+  const dragCol = useRef(null);
+  const moveCol = (from, to) => {
+    if (!from || from === to) return;
+    setCols((cur) => {
+      const a = [...cur];
+      const fi = a.indexOf(from), ti = a.indexOf(to);
+      if (fi < 0 || ti < 0) return cur;
+      a.splice(ti, 0, a.splice(fi, 1)[0]);
+      return a;
+    });
+  };
 
   const loadMarkets = useCallback(() => api.get("/api/markets").then(setMarkets).catch(() => {}), []);
   const load = useCallback(() => {
@@ -225,7 +236,14 @@ function Tracker({ onLogout }) {
             <thead>
               <tr>
                 <th style={{ width: 34 }}></th>
-                {visibleCols.map((c) => <th key={c.field} style={{ width: c.w, textAlign: c.num ? "right" : "left" }}>{c.label}</th>)}
+                {visibleCols.map((c) => (
+                  <th key={c.field} draggable
+                    onDragStart={() => { dragCol.current = c.field; }}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={() => moveCol(dragCol.current, c.field)}
+                    title="Drag to reorder"
+                    style={{ width: c.w, textAlign: c.num ? "right" : "left", cursor: "grab" }}>{c.label}</th>
+                ))}
                 <th style={{ width: 34 }}></th>
               </tr>
             </thead>
