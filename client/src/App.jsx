@@ -48,14 +48,14 @@ const mapsUrl = (p) => {
 };
 const siteUrl = (v) => { const s = String(v || "").trim(); return s ? (/^https?:\/\//i.test(s) ? s : "https://" + s) : ""; };
 const RENT_SEED = [
-  ["Number of Studio Units", "Studio Avg SF", "Studio Asking Rent/Unit"],
-  ["Number of 1 Bedroom Units", "One Bedroom Avg SF", "One Bedroom Asking Rent/Unit"],
-  ["Number of 2 Bedroom Units", "Two Bedroom Avg SF", "Two Bedroom Asking Rent/Unit"],
-  ["Number of 3 Bedroom Units", "Three Bedroom Avg SF", "Three Bedroom Asking Rent/Unit"],
-  ["Number of 4 Bedroom Units", "Four Bedroom Avg SF", "Four Bedroom Asking Rent/Unit"],
+  ["Studio", "Number of Studio Units", "Studio Avg SF", "Studio Asking Rent/Unit"],
+  ["1 Bedroom", "Number of 1 Bedroom Units", "One Bedroom Avg SF", "One Bedroom Asking Rent/Unit"],
+  ["2 Bedroom", "Number of 2 Bedroom Units", "Two Bedroom Avg SF", "Two Bedroom Asking Rent/Unit"],
+  ["3 Bedroom", "Number of 3 Bedroom Units", "Three Bedroom Avg SF", "Three Bedroom Asking Rent/Unit"],
+  ["4 Bedroom", "Number of 4 Bedroom Units", "Four Bedroom Avg SF", "Four Bedroom Asking Rent/Unit"],
 ];
 const seedRent = (extra = {}) => {
-  const rows = RENT_SEED.map(([u, s, r]) => ({ type: "", units: String(extra[u] ?? "").trim(), sf: String(extra[s] ?? "").trim(), rent: String(extra[r] ?? "").trim() }))
+  const rows = RENT_SEED.map(([label, u, s, r]) => ({ type: label, units: String(extra[u] ?? "").trim(), sf: String(extra[s] ?? "").trim(), rent: String(extra[r] ?? "").trim() }))
     .filter((r) => r.units || r.sf || r.rent);
   return rows.length ? rows : [{ type: "", units: "", sf: "", rent: "" }];
 };
@@ -523,6 +523,7 @@ function RentTable({ value, extra, onSave }) {
   return (
     <div>
       <div className="mono" style={{ fontSize: 11, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--inkSoft)", marginBottom: 6 }}>Rent table</div>
+      <div className="rent-wrap">
       <table className="rent-tbl">
         <thead><tr><th>Type</th><th style={{ textAlign: "right" }}># Units</th><th style={{ textAlign: "right" }}>Avg SF</th><th style={{ textAlign: "right" }}>Asking Rent</th><th style={{ textAlign: "right" }}>$/SF</th><th></th></tr></thead>
         <tbody>
@@ -533,11 +534,12 @@ function RentTable({ value, extra, onSave }) {
               <td><input className="num" value={r.sf} inputMode="numeric" onChange={(e) => setCell(i, "sf", e.target.value)} onBlur={persist} /></td>
               <td><input className="num" value={r.rent} inputMode="numeric" onChange={(e) => setCell(i, "rent", e.target.value)} onBlur={persist} /></td>
               <td className="rent-psf">{psf(r.rent, r.sf) || "—"}</td>
-              <td><button className="link" style={{ padding: 4 }} onClick={() => delRow(i)} title="Delete row"><X size={13} /></button></td>
+              <td className="rent-del"><button className="link" style={{ padding: 4 }} onClick={() => delRow(i)} title="Delete row"><X size={13} /></button></td>
             </tr>
           ))}
         </tbody>
       </table>
+      </div>
       <button className="link" style={{ marginTop: 6, color: "var(--teal)" }} onClick={addRow}><Plus size={13} /> Add row</button>
     </div>
   );
