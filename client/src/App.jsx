@@ -67,6 +67,33 @@ const orderedExtraKeys = (d) => {
   return [...inOrder, ...rest];
 };
 
+const FIELD_GROUPS = [
+  { title: "Property", fields: ["Property Name", "PropertyID", "Property Manager Name", "Year Built", "Number of Units", "Website"] },
+  { title: "Location", fields: ["Property Address", "City", "State", "Zip", "County Name", "Latitude", "Longitude", "Parcel Number 1(Min)", "Parcel Number 2(Max)"] },
+  { title: "Rent & unit mix", fields: ["Rent Type", "Avg Effective/Unit",
+    "Number of Studio Units", "Studio Avg SF", "Studio Asking Rent/Unit",
+    "Number of 1 Bedroom Units", "One Bedroom Avg SF", "One Bedroom Asking Rent/Unit",
+    "Number of 2 Bedroom Units", "Two Bedroom Avg SF", "Two Bedroom Asking Rent/Unit",
+    "Number of 3 Bedroom Units", "Three Bedroom Avg SF", "Three Bedroom Asking Rent/Unit",
+    "Number of 4 Bedroom Units", "Four Bedroom Avg SF", "Four Bedroom Asking Rent/Unit"] },
+  { title: "Owner (as listed)", fields: ["Owner Name", "Owner Contact", "Owner Phone", "Owner Address", "Owner City State Zip"] },
+  { title: "True owner", fields: ["True Owner Name", "True Owner Contact", "True Owner Phone", "True Owner Address", "True Owner City State Zip"] },
+  { title: "Sale history", fields: ["Last Sale Date", "Last Sale Price"] },
+  { title: "Financing", fields: ["Originator", "Origination Date", "Origination Amount", "Interest Rate", "Interest Rate Type", "Maturity Date"] },
+];
+const groupedExtra = (d) => {
+  const extra = d.extra || {}, used = new Set();
+  const groups = FIELD_GROUPS.map((g) => {
+    const fields = g.fields.filter((f) => f in extra);
+    fields.forEach((f) => used.add(f));
+    return { title: g.title, fields };
+  }).filter((g) => g.fields.length);
+  const order = Array.isArray(d.extra_order) ? d.extra_order : [];
+  const leftover = [...order.filter((k) => k in extra && !used.has(k)), ...Object.keys(extra).filter((k) => !used.has(k) && !order.includes(k))];
+  if (leftover.length) groups.push({ title: "Additional", fields: leftover });
+  return groups;
+};
+
 const pad = (n) => String(n).padStart(2, "0");
 const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
 const addDays = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
@@ -446,11 +473,16 @@ function PropertyRow({ p, cols, today, open, onToggle, onChange }) {
                   <details style={{ border: "1px solid var(--lineSoft)", borderRadius: 10, padding: "10px 12px" }}>
                     <summary style={{ cursor: "pointer", fontSize: 11, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--inkSoft)" }}>All property data</summary>
                     <div style={{ display: "grid", gridTemplateColumns: "minmax(130px, 38%) 1fr", gap: "6px 14px", marginTop: 12, fontSize: 13 }}>
-                      {orderedExtraKeys(detail).map((k) => (
-                        <React.Fragment key={k}>
-                          <div style={{ color: "var(--muted)", alignSelf: "center" }}>{k}</div>
-                          <input className="in" defaultValue={String(detail.extra[k] ?? "")}
-                            onBlur={(e) => { if (e.target.value !== String(detail.extra[k] ?? "")) patch({ extra: { [k]: e.target.value } }); }} />
+                      {groupedExtra(detail).map((g) => (
+                        <React.Fragment key={g.title}>
+                          <div style={{ gridColumn: "1 / -1", fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--rust)", marginTop: 8, paddingBottom: 4, borderBottom: "1px solid var(--lineSoft)" }}>{g.title}</div>
+                          {g.fields.map((k) => (
+                            <React.Fragment key={k}>
+                              <div style={{ color: "var(--muted)", alignSelf: "center" }}>{k}</div>
+                              <input className="in" defaultValue={String(detail.extra[k] ?? "")}
+                                onBlur={(e) => { if (e.target.value !== String(detail.extra[k] ?? "")) patch({ extra: { [k]: e.target.value } }); }} />
+                            </React.Fragment>
+                          ))}
                         </React.Fragment>
                       ))}
                     </div>
