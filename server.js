@@ -66,7 +66,7 @@ app.get("/api/properties", async (req, res) => {
     select p.id, p.market_id, p.address, p.owner_name, p.phone, p.email,
                p.unit_count, p.status, p.active,
                to_char(p.next_follow_up, 'YYYY-MM-DD') as next_follow_up,
-               p.created_at, p.extra,
+               p.created_at, p.extra, p.extra_order,
                m.name as market_name,
       (select to_char(max(touch_date),'YYYY-MM-DD') from touches t where t.property_id = p.id) as last_touch,
       (select channel from touches t where t.property_id = p.id order by touch_date desc, created_at desc limit 1) as last_channel
@@ -104,6 +104,14 @@ app.patch("/api/properties/:id", async (req, res) => {
     args.push(JSON.stringify(req.body.extra));
     sets.push(`extra = extra || $${args.length}::jsonb`);
   }
+  if (typeof req.body.orderAppend === "string" && req.body.orderAppend) {
+    args.push(JSON.stringify([req.body.orderAppend]));
+    sets.push(`extra_order = extra_order || $${args.length}::jsonb`);
+  }
+  if ("rent_table" in req.body) {
+    args.push(JSON.stringify(Array.isArray(req.body.rent_table) ? req.body.rent_table : []));
+    sets.push(`rent_table = $${args.length}::jsonb`);
+  }
   if (!sets.length) return res.json({ ok: true });
   args.push(req.params.id);
   await pool.query(`update properties set ${sets.join(", ")} where id=$${args.length}`, args);
@@ -136,18 +144,19 @@ app.post("/api/import", async (req, res) => {
       await client.query(`insert into markets (id, name) values ($1,$2)`, [marketId, req.body.marketName.trim()]);
     }
     let n = 0;
+    const order = JSON.stringify(Array.isArray(req.body.order) ? req.body.order : []);
     for (const r of rows) {
       if (!r.address || !String(r.address).trim()) continue;
       await client.query(
-        `insert into properties (id, market_id, address, owner_name, phone, email, unit_count, extra)
-         values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)
+        `insert into properties (id, market_id, address, owner_name, phone, email, unit_count, extra, extra_order)
+         values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb)
          on conflict (market_id, lower(address))
          do update set owner_name=excluded.owner_name, phone=excluded.phone,
                        email=excluded.email, unit_count=excluded.unit_count,
-                       extra=excluded.extra`,
+                       extra=excluded.extra, extra_order=excluded.extra_order`,
         [uid(), marketId || null, String(r.address).trim(), r.owner_name || "", r.phone || "",
          r.email || "", Number.isFinite(+r.unit_count) && r.unit_count !== "" ? +r.unit_count : null,
-         JSON.stringify(r.extra && typeof r.extra === "object" ? r.extra : {})]
+         JSON.stringify(r.extra && typeof r.extra === "object" ? r.extra : {}), order]
       );
       n++;
     }

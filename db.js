@@ -40,6 +40,8 @@ create table if not exists touches (
 );
 alter table properties add column if not exists extra jsonb not null default '{}'::jsonb;
 alter table properties add column if not exists notes text not null default '';
+alter table properties add column if not exists extra_order jsonb not null default '[]'::jsonb;
+alter table properties add column if not exists rent_table jsonb not null default '[]'::jsonb;
 create index if not exists idx_props_market on properties(market_id);
 create index if not exists idx_props_active on properties(active);
 create unique index if not exists idx_props_dedup on properties(market_id, lower(address));

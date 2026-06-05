@@ -51,3 +51,14 @@ input,textarea,select{outline:none}
 .tbl-filter th{position:static;padding:5px 6px;background:var(--surface2);border-bottom:1px solid var(--line)}
 .tbl-filter input,.tbl-filter select{width:100%;font-size:12px;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--ink)}
 .tbl-filter input:focus,.tbl-filter select:focus{border-color:var(--rust)}
+/* header links */
+.head-link{color:var(--teal);text-decoration:none}
+.head-link:hover{text-decoration:underline;color:var(--rust)}
+/* rent table (in popup) */
+.rent-tbl{width:100%;border-collapse:collapse;font-size:13px}
+.rent-tbl th{text-align:left;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);padding:0 6px 4px;font-weight:600}
+.rent-tbl td{padding:0;border:none}
+.rent-tbl input{width:100%;border:1px solid var(--lineSoft);border-radius:6px;background:#fff;color:var(--ink);font-size:13px;padding:5px 7px}
+.rent-tbl input.num{text-align:right}
+.rent-tbl input:focus{border-color:var(--rust);outline:none}
+.rent-psf{text-align:right;padding:0 8px;font-family:'IBM Plex Mono',monospace;font-size:13px;color:var(--inkSoft);white-space:nowrap}

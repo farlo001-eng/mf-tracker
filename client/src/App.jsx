@@ -4,6 +4,7 @@ import Papa from "papaparse";
 import {
   Phone, Mail, MessageSquare, Send, Plus, Search, X, Trash2, Clock, Check,
   ChevronDown, ChevronRight, MapPin, User, Upload, Star, LogOut, Building2, Columns, Filter,
+  Globe, Pencil, Tag, Calendar,
 } from "lucide-react";
 
 /* ---------------- constants & helpers ---------------- */
@@ -37,6 +38,34 @@ const DEFAULT_COLS = ["Property Name", "address", "City", "unit_count", "Year Bu
 const colDesc = (key) => (key in CORE_COLS ? { field: key, ...CORE_COLS[key] } : { field: key, label: key, extra: true, w: 150 });
 const colVal = (p, c) => (c.extra ? (p.extra?.[c.field] ?? "") : (p[c.field] ?? ""));
 const colPatch = (c, v) => (c.extra ? { extra: { [c.field]: v } } : { [c.field]: v });
+
+// header links
+const mapsUrl = (p) => {
+  const e = p.extra || {};
+  const parts = [p.address, e["City"], e["State"], e["Zip"]].map((s) => String(s ?? "").trim()).filter(Boolean);
+  const q = parts.length ? parts.join(", ") : (p.market_name || p.address || "");
+  return "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(q);
+};
+const siteUrl = (v) => { const s = String(v || "").trim(); return s ? (/^https?:\/\//i.test(s) ? s : "https://" + s) : ""; };
+const RENT_SEED = [
+  ["Number of Studio Units", "Studio Avg SF", "Studio Asking Rent/Unit"],
+  ["Number of 1 Bedroom Units", "One Bedroom Avg SF", "One Bedroom Asking Rent/Unit"],
+  ["Number of 2 Bedroom Units", "Two Bedroom Avg SF", "Two Bedroom Asking Rent/Unit"],
+  ["Number of 3 Bedroom Units", "Three Bedroom Avg SF", "Three Bedroom Asking Rent/Unit"],
+  ["Number of 4 Bedroom Units", "Four Bedroom Avg SF", "Four Bedroom Asking Rent/Unit"],
+];
+const seedRent = (extra = {}) => {
+  const rows = RENT_SEED.map(([u, s, r]) => ({ type: "", units: String(extra[u] ?? "").trim(), sf: String(extra[s] ?? "").trim(), rent: String(extra[r] ?? "").trim() }))
+    .filter((r) => r.units || r.sf || r.rent);
+  return rows.length ? rows : [{ type: "", units: "", sf: "", rent: "" }];
+};
+const psf = (rent, sf) => { const r = parseFloat(rent), s = parseFloat(sf); return r > 0 && s > 0 ? (r / s).toFixed(2) : ""; };
+const orderedExtraKeys = (d) => {
+  const extra = d.extra || {}, order = Array.isArray(d.extra_order) ? d.extra_order : [];
+  const inOrder = order.filter((k) => k in extra);
+  const rest = Object.keys(extra).filter((k) => !order.includes(k));
+  return [...inOrder, ...rest];
+};
 
 const pad = (n) => String(n).padStart(2, "0");
 const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
@@ -135,9 +164,10 @@ function Tracker({ onLogout }) {
   const refresh = () => { load(); loadMarkets(); };
 
   const extraKeys = useMemo(() => {
-    const set = new Set();
-    props.forEach((p) => p.extra && Object.keys(p.extra).forEach((k) => set.add(k)));
-    return [...set].sort((a, b) => a.localeCompare(b));
+    const seen = new Set(); const ordered = [];
+    props.forEach((p) => (Array.isArray(p.extra_order) ? p.extra_order : []).forEach((k) => { if (!seen.has(k)) { seen.add(k); ordered.push(k); } }));
+    props.forEach((p) => p.extra && Object.keys(p.extra).forEach((k) => { if (!seen.has(k)) { seen.add(k); ordered.push(k); } }));
+    return ordered;
   }, [props]);
   const allKeys = [...Object.keys(CORE_COLS), ...extraKeys.filter((k) => !(k in CORE_COLS))];
   const visibleCols = cols.map(colDesc);
@@ -350,17 +380,28 @@ function PropertyRow({ p, cols, today, open, onToggle, onChange }) {
             <div className="detail-head">
               <div style={{ minWidth: 0 }}>
                 <div className="display truncate" style={{ fontSize: 18, fontWeight: 600 }}>{p.extra?.["Property Name"] || p.address}</div>
-                <div className="truncate" style={{ fontSize: 12, color: "var(--inkSoft)", marginTop: 2 }}>{p.address}{p.market_name ? ` · ${p.market_name}` : ""}</div>
+                <a className="head-link truncate" href={mapsUrl(p)} target="_blank" rel="noopener noreferrer" style={{ display: "block", fontSize: 12, marginTop: 2 }}>
+                  {p.address}{p.market_name ? ` · ${p.market_name}` : ""}
+                </a>
+                <WebsiteLink value={p.extra?.["Website"]} onSave={(v) => patch({ extra: { Website: v } })} />
               </div>
               <button className="link" onClick={onToggle} style={{ flexShrink: 0 }}><X size={18} /></button>
             </div>
             {detail ? (
               <div className="detail-body">
                 <div style={{ fontSize: 13, display: "flex", flexDirection: "column", gap: 8 }}>
+                  <Editable icon={<Building2 size={13} />} value={detail.unit_count ?? ""} ph="Units" onSave={(v) => patch({ unit_count: v })} />
+                  <Editable icon={<Tag size={13} />} value={detail.extra?.["Rent Type"] ?? ""} ph="Rent type" onSave={(v) => patch({ extra: { "Rent Type": v } })} />
+                  <Editable icon={<Calendar size={13} />} value={detail.extra?.["Year Built"] ?? ""} ph="Year built" onSave={(v) => patch({ extra: { "Year Built": v } })} />
+                </div>
+
+                <div style={{ fontSize: 13, display: "flex", flexDirection: "column", gap: 8 }}>
                   <Editable icon={<User size={13} />} value={detail.owner_name} ph="Owner name" onSave={(v) => patch({ owner_name: v })} />
                   <Editable icon={<Phone size={13} />} value={detail.phone} ph="Phone" onSave={(v) => patch({ phone: v })} />
                   <Editable icon={<Mail size={13} />} value={detail.email} ph="Email" onSave={(v) => patch({ email: v })} />
                 </div>
+
+                <RentTable value={detail.rent_table} extra={detail.extra} onSave={(rows) => patch({ rent_table: rows })} />
 
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                   <select className="in" style={{ width: "auto" }} value={detail.status} onChange={(e) => patch({ status: e.target.value })}>
@@ -401,20 +442,19 @@ function PropertyRow({ p, cols, today, open, onToggle, onChange }) {
                   </div>
                 )}
 
-                {detail.extra && Object.keys(detail.extra).length > 0 && (
+                {detail.extra && (
                   <details style={{ border: "1px solid var(--lineSoft)", borderRadius: 10, padding: "10px 12px" }}>
                     <summary style={{ cursor: "pointer", fontSize: 11, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--inkSoft)" }}>All property data</summary>
-                    <div style={{ display: "grid", gridTemplateColumns: "minmax(130px, 38%) 1fr", gap: "4px 14px", marginTop: 12, fontSize: 13 }}>
-                      {Object.entries(detail.extra)
-                        .filter(([, v]) => v != null && String(v).trim() !== "")
-                        .map(([k, v]) => (
-                          <React.Fragment key={k}>
-                            <div style={{ color: "var(--muted)", alignSelf: "center" }}>{k}</div>
-                            <input className="in" defaultValue={String(v)}
-                              onBlur={(e) => { if (e.target.value !== String(v)) patch({ extra: { [k]: e.target.value } }); }} />
-                          </React.Fragment>
-                        ))}
+                    <div style={{ display: "grid", gridTemplateColumns: "minmax(130px, 38%) 1fr", gap: "6px 14px", marginTop: 12, fontSize: 13 }}>
+                      {orderedExtraKeys(detail).map((k) => (
+                        <React.Fragment key={k}>
+                          <div style={{ color: "var(--muted)", alignSelf: "center" }}>{k}</div>
+                          <input className="in" defaultValue={String(detail.extra[k] ?? "")}
+                            onBlur={(e) => { if (e.target.value !== String(detail.extra[k] ?? "")) patch({ extra: { [k]: e.target.value } }); }} />
+                        </React.Fragment>
+                      ))}
                     </div>
+                    <AddField onAdd={(name, val) => patch({ extra: { [name]: val }, orderAppend: name })} />
                   </details>
                 )}
 
@@ -444,6 +484,74 @@ function NotesBox({ value, onSave }) {
       <div className="mono" style={{ fontSize: 11, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--inkSoft)", marginBottom: 6 }}>Notes</div>
       <textarea className="in" rows={3} placeholder="General notes about this property…" value={v}
         onChange={(e) => setV(e.target.value)} onBlur={() => { if ((value || "") !== v) onSave(v); }} />
+    </div>
+  );
+}
+
+function WebsiteLink({ value, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const [v, setV] = useState(value || "");
+  useEffect(() => setV(value || ""), [value]);
+  const commit = () => { onSave(String(v).trim()); setEditing(false); };
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginTop: 3, minWidth: 0 }}>
+      <Globe size={12} style={{ color: "var(--muted)", flexShrink: 0 }} />
+      {editing ? (
+        <input className="in" autoFocus value={v} placeholder="example.com" style={{ height: 26, fontSize: 12, padding: "2px 6px" }}
+          onChange={(e) => setV(e.target.value)} onBlur={commit}
+          onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") { setV(value || ""); setEditing(false); } }} />
+      ) : value ? (
+        <>
+          <a className="head-link truncate" href={siteUrl(value)} target="_blank" rel="noopener noreferrer">{value}</a>
+          <button className="link" style={{ flexShrink: 0, padding: 2 }} onClick={() => setEditing(true)} title="Edit website"><Pencil size={11} /></button>
+        </>
+      ) : (
+        <button className="link" style={{ color: "var(--muted)" }} onClick={() => setEditing(true)}>Add website</button>
+      )}
+    </div>
+  );
+}
+
+function RentTable({ value, extra, onSave }) {
+  const [rows, setRows] = useState(() => (Array.isArray(value) && value.length ? value : seedRent(extra)));
+  const rowsRef = useRef(rows); rowsRef.current = rows;
+  useEffect(() => { setRows(Array.isArray(value) && value.length ? value : seedRent(extra)); }, [value, extra]);
+  const setCell = (i, key, val) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, [key]: val } : r)));
+  const persist = () => onSave(rowsRef.current);
+  const addRow = () => setRows((rs) => { const n = [...rs, { type: "", units: "", sf: "", rent: "" }]; onSave(n); return n; });
+  const delRow = (i) => setRows((rs) => { const n = rs.filter((_, j) => j !== i); const f = n.length ? n : [{ type: "", units: "", sf: "", rent: "" }]; onSave(f); return f; });
+  return (
+    <div>
+      <div className="mono" style={{ fontSize: 11, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--inkSoft)", marginBottom: 6 }}>Rent table</div>
+      <table className="rent-tbl">
+        <thead><tr><th>Type</th><th style={{ textAlign: "right" }}># Units</th><th style={{ textAlign: "right" }}>Avg SF</th><th style={{ textAlign: "right" }}>Asking Rent</th><th style={{ textAlign: "right" }}>$/SF</th><th></th></tr></thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={i}>
+              <td><input value={r.type} placeholder="e.g. Studio" onChange={(e) => setCell(i, "type", e.target.value)} onBlur={persist} /></td>
+              <td><input className="num" value={r.units} inputMode="numeric" onChange={(e) => setCell(i, "units", e.target.value)} onBlur={persist} /></td>
+              <td><input className="num" value={r.sf} inputMode="numeric" onChange={(e) => setCell(i, "sf", e.target.value)} onBlur={persist} /></td>
+              <td><input className="num" value={r.rent} inputMode="numeric" onChange={(e) => setCell(i, "rent", e.target.value)} onBlur={persist} /></td>
+              <td className="rent-psf">{psf(r.rent, r.sf) || "—"}</td>
+              <td><button className="link" style={{ padding: 4 }} onClick={() => delRow(i)} title="Delete row"><X size={13} /></button></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <button className="link" style={{ marginTop: 6, color: "var(--teal)" }} onClick={addRow}><Plus size={13} /> Add row</button>
+    </div>
+  );
+}
+
+function AddField({ onAdd }) {
+  const [name, setName] = useState("");
+  const [val, setVal] = useState("");
+  const add = () => { const n = name.trim(); if (!n) return; onAdd(n, val.trim()); setName(""); setVal(""); };
+  return (
+    <div style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "center", flexWrap: "wrap" }}>
+      <input className="in" style={{ flex: "1 1 140px" }} placeholder="New field name" value={name} onChange={(e) => setName(e.target.value)} />
+      <input className="in" style={{ flex: "1 1 140px" }} placeholder="Value (optional)" value={val} onChange={(e) => setVal(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") add(); }} />
+      <button className="btn btn-ink" disabled={!name.trim()} style={{ opacity: name.trim() ? 1 : .5 }} onClick={add}><Plus size={14} /> Add field</button>
     </div>
   );
 }
@@ -548,7 +656,7 @@ function ImportModal({ markets, onClose, onDone }) {
       o.extra = r;
       return o;
     }).filter((o) => o.address && String(o.address).trim());
-    const body = marketChoice === "__new" ? { marketName: marketName.trim() || "Imported market", rows: payload } : { marketId: existingMarket, rows: payload };
+    const body = marketChoice === "__new" ? { marketName: marketName.trim() || "Imported market", rows: payload, order: headers } : { marketId: existingMarket, rows: payload, order: headers };
     try { const res = await api.send("/api/import", "POST", body); setResult(res); } catch { setResult({ error: true }); }
     setBusy(false);
   };
