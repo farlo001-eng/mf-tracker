@@ -374,6 +374,7 @@ function PropertyRow({ p, cols, today, open, onToggle, onChange }) {
   }, [open, onToggle]);
 
   const patch = (body) => api.send(`/api/properties/${p.id}`, "PATCH", body).then(() => { onChange(); if (open) api.get(`/api/properties/${p.id}`).then(setDetail); });
+  const reload = () => { api.get(`/api/properties/${p.id}`).then(setDetail); onChange(); };
   const logTouch = () => { if (!draft.note.trim()) return; api.send(`/api/properties/${p.id}/touch`, "POST", { touch_date: draft.date, channel: draft.channel, note: draft.note.trim() }).then(() => { setDraft((d) => ({ ...d, note: "" })); api.get(`/api/properties/${p.id}`).then(setDetail); onChange(); }); };
 
   return (
@@ -460,12 +461,7 @@ function PropertyRow({ p, cols, today, open, onToggle, onChange }) {
 
                 {detail.touches?.length > 0 && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {detail.touches.map((e) => { const C = CHANNELS[e.channel] || CHANNELS.Call; return (
-                      <div key={e.id} style={{ display: "flex", gap: 12, fontSize: 13 }}>
-                        <div className="mono" style={{ width: 64, flexShrink: 0, fontSize: 11, color: "var(--inkSoft)", paddingTop: 2 }}>{fmtDate(e.touch_date)}</div>
-                        <div style={{ flexShrink: 0, paddingTop: 2 }}><C.Icon size={14} style={{ color: C.color }} /></div>
-                        <div>{e.note}</div>
-                      </div>); })}
+                    {detail.touches.map((e) => <TouchRow key={e.id} t={e} onChanged={reload} />)}
                   </div>
                 )}
 
@@ -586,6 +582,43 @@ function AddField({ onAdd }) {
       <input className="in" style={{ flex: "1 1 140px" }} placeholder="New field name" value={name} onChange={(e) => setName(e.target.value)} />
       <input className="in" style={{ flex: "1 1 140px" }} placeholder="Value (optional)" value={val} onChange={(e) => setVal(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") add(); }} />
       <button className="btn btn-ink" disabled={!name.trim()} style={{ opacity: name.trim() ? 1 : .5 }} onClick={add}><Plus size={14} /> Add field</button>
+    </div>
+  );
+}
+
+function TouchRow({ t, onChanged }) {
+  const [editing, setEditing] = useState(false);
+  const [d, setD] = useState({ touch_date: t.touch_date, channel: t.channel, note: t.note });
+  useEffect(() => setD({ touch_date: t.touch_date, channel: t.channel, note: t.note }), [t.id, t.touch_date, t.channel, t.note]);
+  const C = CHANNELS[t.channel] || CHANNELS.Call;
+  const save = () => { if (!d.note.trim()) return; api.send(`/api/touches/${t.id}`, "PATCH", { ...d, note: d.note.trim() }).then(() => { setEditing(false); onChanged(); }); };
+  const del = () => api.send(`/api/touches/${t.id}`, "DELETE").then(onChanged);
+  if (editing) {
+    return (
+      <div style={{ background: "var(--surface2)", border: "1px solid var(--lineSoft)", borderRadius: 8, padding: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <select className="in" style={{ width: "auto" }} value={d.channel} onChange={(e) => setD((s) => ({ ...s, channel: e.target.value }))}>
+            {Object.keys(CHANNELS).map((c) => <option key={c}>{c}</option>)}
+          </select>
+          <input className="in" style={{ width: "auto" }} type="date" value={d.touch_date} onChange={(e) => setD((s) => ({ ...s, touch_date: e.target.value }))} />
+        </div>
+        <textarea className="in" rows={2} value={d.note} onChange={(e) => setD((s) => ({ ...s, note: e.target.value }))} />
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <button className="link" onClick={() => { setD({ touch_date: t.touch_date, channel: t.channel, note: t.note }); setEditing(false); }}>Cancel</button>
+          <button className="btn btn-ink" disabled={!d.note.trim()} style={{ opacity: d.note.trim() ? 1 : .5 }} onClick={save}>Save</button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: "flex", gap: 12, fontSize: 13, alignItems: "flex-start" }}>
+      <div className="mono" style={{ width: 64, flexShrink: 0, fontSize: 11, color: "var(--inkSoft)", paddingTop: 2 }}>{fmtDate(t.touch_date)}</div>
+      <div style={{ flexShrink: 0, paddingTop: 2 }}><C.Icon size={14} style={{ color: C.color }} /></div>
+      <div style={{ flex: 1, minWidth: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{t.note}</div>
+      <div style={{ flexShrink: 0, display: "flex", gap: 2 }}>
+        <button className="link" style={{ padding: 2 }} onClick={() => setEditing(true)} title="Edit"><Pencil size={13} /></button>
+        <button className="link" style={{ padding: 2 }} onClick={del} title="Delete"><Trash2 size={13} /></button>
+      </div>
     </div>
   );
 }

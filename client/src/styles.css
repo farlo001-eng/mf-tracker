@@ -1,8 +1,8 @@
 :root{
-  --paper:#ece5d6; --surface:#f8f4ea; --surface2:#fbf8f0;
-  --ink:#241f18; --inkSoft:#6c6356; --line:#d7cdb9; --lineSoft:#e4dccb;
-  --rust:#a8432a; --rustDeep:#7d2f1d; --teal:#3a6b63; --amber:#bf7016;
-  --green:#4f6b39; --muted:#9a9082;
+  --paper:#e9edf0; --surface:#ffffff; --surface2:#f4f7f9;
+  --ink:#1d2733; --inkSoft:#5a6775; --line:#d4dbe1; --lineSoft:#e7ecf0;
+  --rust:#41709c; --rustDeep:#305a82; --teal:#2f7d72; --amber:#bb7d18;
+  --green:#467a55; --muted:#8c98a4;
 }
 *{box-sizing:border-box}
 html,body{margin:0;padding:0}
@@ -22,7 +22,7 @@ input,textarea,select{outline:none}
 .row-btn{display:flex;width:100%;text-align:left;background:none;border:none;cursor:pointer;padding:12px;gap:12px;align-items:center}
 .pill{font-family:'IBM Plex Mono',monospace;font-size:11px;border-radius:999px;padding:3px 10px;cursor:pointer;border:1px solid var(--line);background:transparent;color:var(--inkSoft)}
 .truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.modal-bg{position:fixed;inset:0;background:rgba(36,31,24,.45);display:flex;align-items:flex-start;justify-content:center;padding:24px 16px;overflow:auto;z-index:50}
+.modal-bg{position:fixed;inset:0;background:rgba(20,28,40,.45);display:flex;align-items:flex-start;justify-content:center;padding:24px 16px;overflow:auto;z-index:50}
 /* spreadsheet-style table */
 .tbl-wrap{border:1px solid var(--line);border-radius:12px;overflow:auto;max-height:68vh;background:var(--surface)}
 .tbl{width:100%;min-width:880px;border-collapse:collapse;table-layout:fixed;font-size:13px}
@@ -38,7 +38,7 @@ input,textarea,select{outline:none}
 .tbl-detail>td{background:var(--surface)}
 /* column picker */
 .colbtn{position:relative}
-.colpop{position:absolute;top:calc(100% + 6px);right:0;z-index:30;width:240px;max-height:320px;overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:8px;box-shadow:0 10px 28px rgba(36,31,24,.18)}
+.colpop{position:absolute;top:calc(100% + 6px);right:0;z-index:30;width:240px;max-height:320px;overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:8px;box-shadow:0 10px 28px rgba(20,28,40,.18)}
 .colpop label{display:flex;gap:8px;align-items:center;padding:5px 6px;font-size:13px;cursor:pointer;border-radius:6px;color:var(--ink)}
 .colpop label:hover{background:var(--surface2)}
 .colpop input[type=checkbox]{accent-color:var(--rust)}

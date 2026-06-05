@@ -132,6 +132,21 @@ app.post("/api/properties/:id/touch", async (req, res) => {
   res.json({ ok: true });
 });
 
+app.patch("/api/touches/:id", async (req, res) => {
+  const allowed = ["touch_date", "channel", "note"];
+  const sets = [], args = [];
+  for (const k of allowed) if (k in req.body) { args.push(req.body[k]); sets.push(`${k}=$${args.length}`); }
+  if (!sets.length) return res.json({ ok: true });
+  args.push(req.params.id);
+  await pool.query(`update touches set ${sets.join(", ")} where id=$${args.length}`, args);
+  res.json({ ok: true });
+});
+
+app.delete("/api/touches/:id", async (req, res) => {
+  await pool.query(`delete from touches where id=$1`, [req.params.id]);
+  res.json({ ok: true });
+});
+
 /* ---------------- bulk import (upsert by market + address) ---------------- */
 app.post("/api/import", async (req, res) => {
   const { rows = [] } = req.body;
