@@ -1,53 +1,96 @@
-## Current State (2026-06-04)
+## Current State (2026-06-08)
 
-The property detail is now a focused modal overlay rendered via `createPortal` into
-`document.body`, completely decoupled from the scrollable table grid.
+The property detail modal has been significantly overhauled. Imported data now stays
+intact — every field is shown (even blank), editable, in original spreadsheet order.
 
-### How the modal works
-- Clicking the expand chevron in any table row sets `expanded` in `Tracker`, which
-  passes `open={true}` down to that `PropertyRow`.
-- `PropertyRow` renders a `createPortal(...)` targeting `document.body` when `open`
-  is true. While the detail API call is in flight it shows a "Loading…" state; once
-  resolved it renders the full detail body.
-- Clicking the backdrop (`modal-bg`) or the X button calls `onToggle` to close.
-- Pressing Escape also closes via a `window.addEventListener("keydown")` effect
-  that is torn down when the row closes.
-- The table row itself no longer has a second `<tr>` sibling; the `<>` fragment now
-  contains only the data row.
-
-### Layout structure
+### Modal layout structure
 ```
 .modal-bg (fixed overlay, z-index 50)
   └── .card.detail-modal (720px, max-height 88vh, flex column)
-        ├── .detail-head (sticky header — property name, address, X button)
+        ├── .detail-head
+        │     ├── Property Name (display font, large)
+        │     ├── <a> Maps link (address · market) — opens Google Maps
+        │     ├── WebsiteLink (Globe icon; clickable link or "Add website")
+        │     └── X close button
         └── .detail-body (scrollable, flex column, gap 14)
-              ├── Editable fields (owner, phone, email)
+              ├── Key stats (units / rent type / year built)
+              ├── Owner / phone / email (Editable fields)
+              ├── RentTable (unit type, # units, avg SF, asking rent, $/SF)
               ├── Status / follow-up / quick-date pills
               ├── NotesBox
               ├── Touch logger
               ├── Touch history
-              └── All property data (expandable)
+              └── "All property data" (expandable <details>)
+                    ├── All extra fields in import order (all shown, even blank)
+                    └── AddField component (add new key/value pair)
 ```
 
-### Files changed
-- `client/src/styles.css` — `.detail-modal`, `.detail-head`, `.detail-body` appended
-- `client/src/App.jsx` — `createPortal` import; Escape handler useEffect; inline
-  `tbl-detail` tr replaced with portal modal
+### New DB columns
+- `extra_order jsonb not null default '[]'` — tracks import column order per property
+- `rent_table jsonb not null default '[]'` — stores rent table rows per property
 
-### Per-column filtering
-A "Filters" button in the toolbar toggles a `tbl-filter` row inside `<thead>`. Each
-visible column gets an `<input>` (contains, case-insensitive) or a `<select>` (status
-exact-match). `activeFilters` derives from `filters` state filtered to currently-visible
-columns. `filtered` is a `useMemo` over `props × filters × cols`. The Filters button
-turns rust-coloured and shows a count badge when any filter is active; a "Clear" link
-appears beside it. The "no match" empty state is a full-width `<td>` row in `<tbody>`.
+### New server behaviour
+- GET /api/properties returns `p.extra_order`
+- POST /api/import captures `req.body.order` (header array) and stores in `extra_order`
+- PATCH /api/properties/:id supports:
+  - `orderAppend` (string) — appends a single key to `extra_order` via jsonb concat
+  - `rent_table` (array) — replaces the rent table
 
-### Column reordering
-Columns can be dragged to reorder by dragging a header cell. A `dragCol` ref holds the
-field key of the column being dragged; `moveCol(from, to)` splices `cols` state in place
-and persists to localStorage via the existing `useEffect`. The `:active` CSS rule gives
-visual feedback (grabbing cursor + rust color) while dragging.
+### New / changed client components
+- `WebsiteLink` — header sub-component for editable website URL with Globe icon
+- `RentTable` — tabular rent data with type/units/SF/rent columns + $/SF computed;
+  seeds from imported RENT_SEED fields if rent_table is empty; wrapped in `.rent-wrap`
+  div for bordered/rounded container; type column prefilled from RENT_SEED labels
+- `FIELD_GROUPS` / `groupedExtra(d)` — groups extra fields into 7 named sections
+  (Property, Location, Rent & unit mix, Owner as listed, True owner, Sale history,
+  Financing); uncategorised keys fall into an "Additional" section respecting
+  extra_order; replaces flat `orderedExtraKeys` grid in "All property data" panel;
+  section headers are full-width mono/uppercase/rust rows with a lineSoft underline
+- `AddField` — inline form at the bottom of "All property data" to append new keys
+- `orderedExtraKeys(d)` — helper that respects `extra_order` then appends remainder
+- `seedRent(extra)` — maps well-known rent-related import columns to RentTable rows
+- `psf(rent, sf)` — computes $/SF; returns "" if either value is non-numeric
+- `mapsUrl(p)` — builds Google Maps search URL from address + City/State/Zip
+- `siteUrl(v)` — normalises bare domain strings to https:// URLs
+- `extraKeys` useMemo now orders by `extra_order` across all props, then remainder
+
+### CSS additions
+- `.head-link` / `.head-link:hover` — teal link style with rust hover
+- `.rent-tbl` / `.rent-tbl th/td/input` — rent table styles
+- `.rent-psf` — right-aligned mono $/SF column
+
+### Color theme — Slate
+CSS custom properties switched from warm parchment to slate blue-grey:
+`--paper` #e9edf0, `--surface` #fff, `--surface2` #f4f7f9, `--rust` (accent) #41709c
+(steel blue), `--ink` #1d2733. Overlay tints cooled to `rgba(20,28,40,...)`.
+
+### Editable/deletable touches
+- `reload()` helper in `PropertyRow` — re-fetches detail and calls `onChange`
+- `TouchRow` component replaces inline map; view mode shows date/icon/note with
+  Pencil + Trash2 action buttons; edit mode shows channel select, date input,
+  textarea, Save/Cancel
+- Server: `PATCH /api/touches/:id` updates date/channel/note; `DELETE /api/touches/:id`
+  removes the touch; both guarded by the existing auth middleware
+
+### Attachments (added 2026-06-08)
+Files (Excel/PDF, ≤10 MB) are stored as `bytea` in a new `attachments` table.
+Upload path: FileReader → base64 → POST /api/properties/:id/attachments → decode → pg.
+Download: GET /api/attachments/:id streams the buffer with correct Content-Type.
+The `Attachments` component appears in the detail modal just before "All property data".
+
+### DB additions
+- `attachments` table with id, property_id (FK → properties, cascade delete), filename,
+  mime, size, data bytea, created_at
+- `idx_attach_prop` index on attachments(property_id)
+
+### Server additions
+- JSON body limit raised to 20 MB (to fit base64-encoded 10 MB file)
+- POST /api/properties/:id/attachments — upload handler
+- GET /api/attachments/:id — download/stream handler
+- DELETE /api/attachments/:id — delete handler
+- GET /api/properties/:id now returns `attachments` array (metadata only, no data field)
 
 ### Next step
 No pending work. Possible additions: animated open/close, keyboard navigation between
-rows (← → arrows to move to prev/next property).
+rows (← → arrows to move to prev/next property), export/print rent table, attachment
+count badge on property rows.

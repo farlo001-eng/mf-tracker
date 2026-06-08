@@ -4,7 +4,7 @@ import Papa from "papaparse";
 import {
   Phone, Mail, MessageSquare, Send, Plus, Search, X, Trash2, Clock, Check,
   ChevronDown, ChevronRight, MapPin, User, Upload, Star, LogOut, Building2, Columns, Filter,
-  Globe, Pencil, Tag, Calendar,
+  Globe, Pencil, Tag, Calendar, Paperclip, FileText,
 } from "lucide-react";
 
 /* ---------------- constants & helpers ---------------- */
@@ -60,6 +60,7 @@ const seedRent = (extra = {}) => {
   return rows.length ? rows : [{ type: "", units: "", sf: "", rent: "" }];
 };
 const psf = (rent, sf) => { const r = parseFloat(rent), s = parseFloat(sf); return r > 0 && s > 0 ? (r / s).toFixed(2) : ""; };
+const fmtSize = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB");
 const orderedExtraKeys = (d) => {
   const extra = d.extra || {}, order = Array.isArray(d.extra_order) ? d.extra_order : [];
   const inOrder = order.filter((k) => k in extra);
@@ -465,6 +466,8 @@ function PropertyRow({ p, cols, today, open, onToggle, onChange }) {
                   </div>
                 )}
 
+                <Attachments propertyId={p.id} items={detail.attachments || []} onChanged={reload} />
+
                 {detail.extra && (
                   <details style={{ border: "1px solid var(--lineSoft)", borderRadius: 10, padding: "10px 12px" }}>
                     <summary style={{ cursor: "pointer", fontSize: 11, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--inkSoft)" }}>All property data</summary>
@@ -619,6 +622,48 @@ function TouchRow({ t, onChanged }) {
         <button className="link" style={{ padding: 2 }} onClick={() => setEditing(true)} title="Edit"><Pencil size={13} /></button>
         <button className="link" style={{ padding: 2 }} onClick={del} title="Delete"><Trash2 size={13} /></button>
       </div>
+    </div>
+  );
+}
+
+function Attachments({ propertyId, items, onChanged }) {
+  const ref = useRef(null);
+  const [busy, setBusy] = useState(false);
+  const upload = (file) => {
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) { alert("File too large — max 10 MB."); return; }
+    setBusy(true);
+    const r = new FileReader();
+    r.onload = () => {
+      const data = String(r.result).split(",")[1] || "";
+      api.send(`/api/properties/${propertyId}/attachments`, "POST", { filename: file.name, mime: file.type, data })
+        .then(() => onChanged())
+        .catch(() => alert("Upload failed."))
+        .finally(() => { setBusy(false); if (ref.current) ref.current.value = ""; });
+    };
+    r.onerror = () => { setBusy(false); alert("Could not read file."); };
+    r.readAsDataURL(file);
+  };
+  const del = (id) => api.send(`/api/attachments/${id}`, "DELETE").then(onChanged);
+  return (
+    <div>
+      <div className="mono" style={{ fontSize: 11, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--inkSoft)", marginBottom: 6 }}>Attachments</div>
+      {items.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 8 }}>
+          {items.map((a) => (
+            <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+              <FileText size={14} style={{ color: "var(--inkSoft)", flexShrink: 0 }} />
+              <a className="head-link" href={`/api/attachments/${a.id}`} target="_blank" rel="noopener noreferrer" style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.filename}</a>
+              <span className="mono" style={{ fontSize: 11, color: "var(--muted)", flexShrink: 0 }}>{fmtSize(a.size)}</span>
+              <button className="link" style={{ padding: 2, flexShrink: 0 }} onClick={() => del(a.id)} title="Delete"><Trash2 size={13} /></button>
+            </div>
+          ))}
+        </div>
+      )}
+      <input ref={ref} type="file" accept=".pdf,.xls,.xlsx,.csv,application/pdf" style={{ display: "none" }} onChange={(e) => upload(e.target.files?.[0])} />
+      <button className="link" disabled={busy} style={{ color: "var(--teal)", opacity: busy ? .6 : 1 }} onClick={() => ref.current?.click()}>
+        <Paperclip size={13} /> {busy ? "Uploading…" : "Add file"}
+      </button>
     </div>
   );
 }

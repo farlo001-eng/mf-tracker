@@ -7,7 +7,7 @@ import { pool, ensureSchema, uid } from "./db.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
-app.use(express.json({ limit: "8mb" }));
+app.use(express.json({ limit: "20mb" }));
 app.use(cookieParser());
 
 /* ---------------- auth (single password) ---------------- */
@@ -93,7 +93,10 @@ app.get("/api/properties/:id", async (req, res) => {
   const t = await pool.query(
     `select id, to_char(touch_date,'YYYY-MM-DD') as touch_date, channel, note
      from touches where property_id=$1 order by touch_date desc, created_at desc`, [req.params.id]);
-  res.json({ ...rows[0], touches: t.rows });
+  const at = await pool.query(
+    `select id, filename, mime, size, to_char(created_at,'YYYY-MM-DD') as created_at
+     from attachments where property_id=$1 order by created_at desc`, [req.params.id]);
+  res.json({ ...rows[0], touches: t.rows, attachments: at.rows });
 });
 
 app.patch("/api/properties/:id", async (req, res) => {
@@ -129,6 +132,32 @@ app.post("/api/properties/:id/touch", async (req, res) => {
     `insert into touches (id, property_id, touch_date, channel, note) values ($1,$2,$3,$4,$5)`,
     [uid(), req.params.id, b.touch_date, b.channel, b.note || ""]
   );
+  res.json({ ok: true });
+});
+
+/* ---------------- attachments (stored in Postgres) ---------------- */
+app.post("/api/properties/:id/attachments", async (req, res) => {
+  const { filename, mime, data } = req.body || {};
+  if (!filename || !data) return res.status(400).json({ error: "missing file" });
+  const buf = Buffer.from(String(data), "base64");
+  if (buf.length > 10 * 1024 * 1024) return res.status(413).json({ error: "file too large (max 10MB)" });
+  await pool.query(
+    `insert into attachments (id, property_id, filename, mime, size, data) values ($1,$2,$3,$4,$5,$6)`,
+    [uid(), req.params.id, String(filename), String(mime || ""), buf.length, buf]
+  );
+  res.json({ ok: true });
+});
+
+app.get("/api/attachments/:id", async (req, res) => {
+  const { rows } = await pool.query(`select filename, mime, data from attachments where id=$1`, [req.params.id]);
+  if (!rows[0]) return res.status(404).json({ error: "not found" });
+  res.setHeader("Content-Type", rows[0].mime || "application/octet-stream");
+  res.setHeader("Content-Disposition", `inline; filename="${String(rows[0].filename).replace(/"/g, "")}"`);
+  res.send(rows[0].data);
+});
+
+app.delete("/api/attachments/:id", async (req, res) => {
+  await pool.query(`delete from attachments where id=$1`, [req.params.id]);
   res.json({ ok: true });
 });
 

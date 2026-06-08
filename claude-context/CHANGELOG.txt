@@ -1,3 +1,47 @@
+2026-06-08  File attachments stored in Postgres (Excel/PDF, 10 MB cap)
+            - db.js: attachments table (id, property_id, filename, mime, size, data bytea,
+              created_at); idx_attach_prop index on property_id
+            - server.js: JSON body limit raised 8mb → 20mb; POST /api/properties/:id/attachments
+              (base64 decode, size check, insert); GET /api/attachments/:id (stream file);
+              DELETE /api/attachments/:id; GET /api/properties/:id now also queries
+              attachments and returns attachments[] array alongside touches[]
+            - App.jsx: Paperclip + FileText icons added to lucide-react import; fmtSize()
+              helper (KB/MB display); Attachments component (FileReader base64 upload,
+              per-item delete, Add file button); rendered in detail modal just before
+              "All property data" section
+2026-06-05  Slate theme + editable/deletable touch log entries
+            - styles.css: replace warm parchment palette with slate blue-grey neutrals
+              (--rust → steel blue #41709c, --paper → #e9edf0, --surface → #fff, etc.);
+              overlay tints cooled to rgba(20,28,40,...)
+            - server.js: PATCH /api/touches/:id (update date/channel/note) and
+              DELETE /api/touches/:id handlers added after POST touch handler
+            - App.jsx: reload() helper in PropertyRow; touches list uses TouchRow
+              component; TouchRow shows view mode with Pencil/Trash2 buttons and
+              inline edit form (channel select + date input + textarea + Save/Cancel)
+2026-06-04  Group "All property data" into labelled sections
+            - App.jsx: FIELD_GROUPS constant (7 sections: Property, Location, Rent & unit
+              mix, Owner as listed, True owner, Sale history, Financing); groupedExtra()
+              builds groups from d.extra + appends Additional for uncategorised keys;
+              flat orderedExtraKeys grid replaced with grouped grid — section titles span
+              full width in mono/uppercase/rust with lineSoft bottom border
+2026-06-04  Fix rent table: prefill type labels and styled bordered layout
+            - App.jsx: RENT_SEED gains label column; seedRent destructures [label,u,s,r]
+              and sets type:label so Studio/1BR/2BR/3BR/4BR auto-fill from imported data;
+              table wrapped in <div className="rent-wrap">; delete <td> gets .rent-del
+            - styles.css: .rent-wrap (bordered rounded container); th padding+bg+border;
+              td grid borders (no bottom on last row, no right on last col); inputs
+              borderless with focus outline; .rent-psf gets surface2 bg; .rent-del added
+2026-06-04  Popup overhaul: rent table, header links, ordered extra fields, AddField
+            - db.js: extra_order jsonb + rent_table jsonb columns (idempotent alters)
+            - server.js: GET returns extra_order; import stores order; PATCH handles
+              orderAppend (jsonb concat) and rent_table replacement
+            - styles.css: .head-link, .rent-tbl/th/td/input/.num, .rent-psf rules
+            - App.jsx: Globe/Pencil/Tag/Calendar icons; mapsUrl/siteUrl/RENT_SEED/
+              seedRent/psf/orderedExtraKeys helpers; WebsiteLink/RentTable/AddField
+              components; Maps link + WebsiteLink in popup header; key-stats row
+              (units/rent type/year built) above owner block; RentTable after owner;
+              "All property data" shows all keys (blank too) in import order with AddField;
+              extraKeys useMemo now order-aware; doImport sends order:headers
 2026-06-04  Add per-column filter row (Excel-style)
             - App.jsx: Filter icon; showFilters/filters/setFilter state; activeFilters/filterCount/
               filtered (useMemo); Filters button + Clear link in toolbar; tbl-filter <tr> in <thead>;
