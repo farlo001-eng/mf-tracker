@@ -1,3 +1,21 @@
+2026-07-06  Owner tracking: owners table linkable to properties
+            - db.js: new `owners` table; `properties.owner_id` (FK, set null on delete);
+              `touches.owner_id` (FK, cascade) + `touches.property_id` made nullable +
+              touches_one_target CHECK (exactly one of property_id/owner_id); guarded
+              one-time migrateOwnersFromPropertyNames() backfill runs in ensureSchema()
+            - server.js: full owners CRUD (GET list w/ rollups, POST, GET/PATCH/DELETE :id,
+              POST :id/touch, POST /merge); GET /api/properties + /:id join owners and
+              return linked_owner_name; PATCH /api/properties/:id allows owner_id; POST
+              /api/import links/creates an owner per row, returns ownersCreated
+            - App.jsx: top-level Desk/Properties/Owners nav in Tracker; DeskView unifies
+              due owners+properties; PropertyRow no longer owns modal state — PropertyModal
+              extracted so any view can open it by id; new OwnerLink combobox (search/link/
+              create/unlink) in the property modal; new owner_id "Linked owner" column in
+              the properties table; OwnersView/OwnerRow/AddOwnerForm/OwnerModal added,
+              mirroring the properties table/detail patterns
+            - Manual step still required: run pg_dump backup against production
+              DATABASE_URL before deploying (no DB credentials available in the dev
+              sandbox that built this change)
 2026-06-08  File attachments stored in Postgres (Excel/PDF, 10 MB cap)
             - db.js: attachments table (id, property_id, filename, mime, size, data bytea,
               created_at); idx_attach_prop index on property_id

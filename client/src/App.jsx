@@ -3,8 +3,8 @@ import { createPortal } from "react-dom";
 import Papa from "papaparse";
 import {
   Phone, Mail, MessageSquare, Send, Plus, Search, X, Trash2, Clock, Check,
-  ChevronDown, ChevronRight, MapPin, User, Upload, Star, LogOut, Building2, Columns, Filter,
-  Globe, Pencil, Tag, Calendar, Paperclip, FileText,
+  ChevronRight, MapPin, User, Upload, Star, LogOut, Building2, Columns, Filter,
+  Globe, Pencil, Tag, Calendar, Paperclip, FileText, Users,
 } from "lucide-react";
 
 /* ---------------- constants & helpers ---------------- */
@@ -27,16 +27,17 @@ const FIELDS = [
 // text field read from property.extra[key]. Users pick which columns show (Columns button).
 const CORE_COLS = {
   address:        { label: "Address", w: 200 },
-  owner_name:     { label: "Owner", w: 170 },
+  owner_name:     { label: "Owner (as imported)", w: 170 },
+  owner_id:       { label: "Linked owner", w: 150, type: "owner" },
   phone:          { label: "Phone", w: 130 },
   email:          { label: "Email", w: 160 },
   unit_count:     { label: "Units", w: 70, num: true },
   status:         { label: "Status", w: 110, type: "status" },
   next_follow_up: { label: "Follow-up", w: 130, type: "date" },
 };
-const DEFAULT_COLS = ["Property Name", "address", "City", "unit_count", "Year Built", "status", "next_follow_up"];
+const DEFAULT_COLS = ["Property Name", "address", "owner_id", "City", "unit_count", "Year Built", "status", "next_follow_up"];
 const colDesc = (key) => (key in CORE_COLS ? { field: key, ...CORE_COLS[key] } : { field: key, label: key, extra: true, w: 150 });
-const colVal = (p, c) => (c.extra ? (p.extra?.[c.field] ?? "") : (p[c.field] ?? ""));
+const colVal = (p, c) => (c.type === "owner" ? (p.linked_owner_name || "") : c.extra ? (p.extra?.[c.field] ?? "") : (p[c.field] ?? ""));
 const colPatch = (c, v) => (c.extra ? { extra: { [c.field]: v } } : { [c.field]: v });
 
 // header links
@@ -140,13 +141,108 @@ function Login({ onOk }) {
 
 /* ---------------- tracker ---------------- */
 function Tracker({ onLogout }) {
+  const [view, setView] = useState("desk"); // desk | properties | owners
   const [markets, setMarkets] = useState([]);
+  const [expandedPropertyId, setExpandedPropertyId] = useState(null);
+  const [expandedOwnerId, setExpandedOwnerId] = useState(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const bump = () => setRefreshKey((k) => k + 1);
+
+  const loadMarkets = useCallback(() => api.get("/api/markets").then(setMarkets).catch(() => {}), []);
+  useEffect(() => { loadMarkets(); }, [loadMarkets]);
+
+  return (
+    <div style={{ maxWidth: 1180, margin: "0 auto", padding: "24px 16px 60px" }}>
+      {/* header */}
+      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between" }}>
+        <h1 className="display" style={{ fontSize: 30, fontWeight: 600, margin: 0, letterSpacing: "-.02em" }}>Outreach Ledger</h1>
+        <button className="link" onClick={() => api.send("/api/logout", "POST").then(onLogout)}><LogOut size={14} /> Log out</button>
+      </div>
+
+      {/* top-level nav */}
+      <div style={{ display: "flex", border: "1px solid var(--line)", borderRadius: 8, overflow: "hidden", width: "fit-content", margin: "14px 0 16px" }}>
+        {[["desk", "Desk"], ["properties", "Properties"], ["owners", "Owners"]].map(([k, lbl]) => (
+          <button key={k} onClick={() => setView(k)} className="mono"
+            style={{ fontSize: 12, padding: "8px 14px", border: "none", cursor: "pointer",
+              background: view === k ? "var(--ink)" : "transparent", color: view === k ? "#fff" : "var(--inkSoft)" }}>{lbl}</button>
+        ))}
+      </div>
+
+      {view === "desk" && (
+        <DeskView refreshKey={refreshKey} onOpenProperty={setExpandedPropertyId} onOpenOwner={setExpandedOwnerId} />
+      )}
+      {view === "properties" && (
+        <PropertiesView markets={markets} loadMarkets={loadMarkets} refreshKey={refreshKey} bump={bump}
+          expandedPropertyId={expandedPropertyId} onOpenProperty={setExpandedPropertyId} />
+      )}
+      {view === "owners" && (
+        <OwnersView refreshKey={refreshKey} bump={bump} onOpenOwner={setExpandedOwnerId} />
+      )}
+
+      <div className="mono" style={{ textAlign: "center", color: "var(--muted)", fontSize: 11, marginTop: 26 }}>
+        Your data · stored in your own database
+      </div>
+
+      {expandedPropertyId && (
+        <PropertyModal id={expandedPropertyId} onClose={() => setExpandedPropertyId(null)} onChange={bump} onOpenOwner={setExpandedOwnerId} />
+      )}
+      {expandedOwnerId && (
+        <OwnerModal id={expandedOwnerId} onClose={() => setExpandedOwnerId(null)} onChange={bump} onOpenProperty={setExpandedPropertyId} />
+      )}
+    </div>
+  );
+}
+
+/* ---------------- desk (unified) ---------------- */
+function DeskView({ refreshKey, onOpenProperty, onOpenOwner }) {
+  const [owners, setOwners] = useState([]);
+  const [props, setProps] = useState([]);
+  useEffect(() => {
+    api.get("/api/owners").then(setOwners).catch(() => {});
+    api.get("/api/properties?active=1").then(setProps).catch(() => {});
+  }, [refreshKey]);
+
+  const today = todayStr();
+  const dueOwners = owners.filter((o) => o.active && o.next_follow_up && o.next_follow_up <= today)
+    .map((o) => ({ kind: "Owner", id: o.id, title: o.name, sub: null, last_touch: o.last_touch, last_channel: o.last_channel, next_follow_up: o.next_follow_up }));
+  const dueProps = props.filter((p) => p.active && p.status !== "Dead" && p.next_follow_up && p.next_follow_up <= today)
+    .map((p) => ({ kind: "Property", id: p.id, title: p.address, sub: p.owner_name, last_touch: p.last_touch, last_channel: p.last_channel, next_follow_up: p.next_follow_up }));
+  const due = [...dueOwners, ...dueProps].sort((a, b) => (a.next_follow_up || "").localeCompare(b.next_follow_up || ""));
+
+  return (
+    <div className="card" style={{ padding: 16, marginBottom: 18 }}>
+      <div className="mono" style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, letterSpacing: ".06em", textTransform: "uppercase", color: "var(--rustDeep)", marginBottom: 10 }}>
+        <Clock size={14} /> Reach out today · {due.length}
+      </div>
+      {due.length === 0
+        ? <div style={{ display: "flex", gap: 8, alignItems: "center", color: "var(--inkSoft)", fontSize: 13 }}><Check size={15} style={{ color: "var(--green)" }} /> Nothing due on your desk.</div>
+        : <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {due.map((item) => { const d = daysFromToday(item.next_follow_up); const C = CHANNELS[item.last_channel]; return (
+              <button key={`${item.kind}-${item.id}`} className="row-btn" style={{ background: "var(--surface2)", border: "1px solid var(--lineSoft)", borderRadius: 10 }}
+                onClick={() => (item.kind === "Owner" ? onOpenOwner(item.id) : onOpenProperty(item.id))}>
+                <span className="mono" style={{ flexShrink: 0, fontSize: 10, letterSpacing: ".04em", textTransform: "uppercase", padding: "3px 7px", borderRadius: 999,
+                  border: "1px solid var(--line)", color: "var(--inkSoft)" }}>{item.kind}</span>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div className="truncate" style={{ fontWeight: 600, fontSize: 14 }}>{item.title}</div>
+                  {item.sub && <div className="truncate" style={{ color: "var(--inkSoft)", fontSize: 12 }}>{item.sub}</div>}
+                </div>
+                {C && <C.Icon size={14} style={{ color: C.color, flexShrink: 0 }} />}
+                <span className="mono" style={{ fontSize: 11, whiteSpace: "nowrap", padding: "3px 9px", borderRadius: 999,
+                  border: "1px solid var(--rust)", color: d < 0 ? "#fff" : "var(--rustDeep)", background: d < 0 ? "var(--rust)" : "transparent" }}>
+                  {d < 0 ? `${-d}d overdue` : "due today"}</span>
+              </button>); })}
+          </div>}
+    </div>
+  );
+}
+
+/* ---------------- properties view ---------------- */
+function PropertiesView({ markets, loadMarkets, refreshKey, bump, expandedPropertyId, onOpenProperty }) {
   const [market, setMarket] = useState("");      // "" = all
   const [tab, setTab] = useState("desk");        // desk | all
   const [props, setProps] = useState([]);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("All");
-  const [expanded, setExpanded] = useState(null);
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
 
@@ -172,7 +268,6 @@ function Tracker({ onLogout }) {
     });
   };
 
-  const loadMarkets = useCallback(() => api.get("/api/markets").then(setMarkets).catch(() => {}), []);
   const load = useCallback(() => {
     const p = new URLSearchParams();
     if (market) p.set("market", market);
@@ -182,14 +277,10 @@ function Tracker({ onLogout }) {
     api.get(`/api/properties?${p}`).then(setProps).catch(() => {});
   }, [market, tab, status, query]);
 
-  useEffect(() => { loadMarkets(); }, [loadMarkets]);
-  useEffect(() => { const t = setTimeout(load, query ? 250 : 0); return () => clearTimeout(t); }, [load, query]);
+  useEffect(() => { const t = setTimeout(load, query ? 250 : 0); return () => clearTimeout(t); }, [load, query, refreshKey]);
 
   const today = todayStr();
-  const due = props.filter((p) => p.active && p.status !== "Dead" && p.next_follow_up && p.next_follow_up <= today)
-    .sort((a, b) => (a.next_follow_up || "").localeCompare(b.next_follow_up || ""));
-
-  const refresh = () => { load(); loadMarkets(); };
+  const refresh = () => { load(); loadMarkets(); bump(); };
 
   const extraKeys = useMemo(() => {
     const seen = new Set(); const ordered = [];
@@ -212,15 +303,9 @@ function Tracker({ onLogout }) {
   }, [props, filters, cols]);
 
   return (
-    <div style={{ maxWidth: 1180, margin: "0 auto", padding: "24px 16px 60px" }}>
-      {/* header */}
-      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between" }}>
-        <h1 className="display" style={{ fontSize: 30, fontWeight: 600, margin: 0, letterSpacing: "-.02em" }}>Outreach Ledger</h1>
-        <button className="link" onClick={() => api.send("/api/logout", "POST").then(onLogout)}><LogOut size={14} /> Log out</button>
-      </div>
-
+    <div>
       {/* market + tabs */}
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", margin: "14px 0 16px" }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 16 }}>
         <select className="in" style={{ width: "auto" }} value={market} onChange={(e) => setMarket(e.target.value)}>
           <option value="">All markets</option>
           {markets.map((m) => <option key={m.id} value={m.id}>{m.name} ({m.property_count})</option>)}
@@ -235,28 +320,6 @@ function Tracker({ onLogout }) {
         <button className="btn btn-primary" style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }} onClick={() => setImporting(true)}>
           <Upload size={15} /> Import
         </button>
-      </div>
-
-      {/* due panel */}
-      <div className="card" style={{ padding: 16, marginBottom: 18 }}>
-        <div className="mono" style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, letterSpacing: ".06em", textTransform: "uppercase", color: "var(--rustDeep)", marginBottom: 10 }}>
-          <Clock size={14} /> Reach out today · {due.length}
-        </div>
-        {due.length === 0
-          ? <div style={{ display: "flex", gap: 8, alignItems: "center", color: "var(--inkSoft)", fontSize: 13 }}><Check size={15} style={{ color: "var(--green)" }} /> Nothing due on your desk.</div>
-          : <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {due.map((p) => { const d = daysFromToday(p.next_follow_up); return (
-                <button key={p.id} className="row-btn" style={{ background: "var(--surface2)", border: "1px solid var(--lineSoft)", borderRadius: 10 }}
-                  onClick={() => setExpanded(p.id)}>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div className="truncate" style={{ fontWeight: 600, fontSize: 14 }}>{p.address}</div>
-                    <div className="truncate" style={{ color: "var(--inkSoft)", fontSize: 12 }}>{p.owner_name || "—"}</div>
-                  </div>
-                  <span className="mono" style={{ fontSize: 11, whiteSpace: "nowrap", padding: "3px 9px", borderRadius: 999,
-                    border: "1px solid var(--rust)", color: d < 0 ? "#fff" : "var(--rustDeep)", background: d < 0 ? "var(--rust)" : "transparent" }}>
-                    {d < 0 ? `${-d}d overdue` : "due today"}</span>
-                </button>); })}
-            </div>}
       </div>
 
       {/* toolbar */}
@@ -345,165 +408,463 @@ function Tracker({ onLogout }) {
               {filtered.length === 0 ? (
                 <tr><td colSpan={visibleCols.length + 2} style={{ padding: "22px", textAlign: "center", color: "var(--inkSoft)", fontSize: 13 }}>No properties match your filters.</td></tr>
               ) : filtered.map((p) => (
-                <PropertyRow key={p.id} p={p} cols={visibleCols} today={today} open={expanded === p.id}
-                  onToggle={() => setExpanded(expanded === p.id ? null : p.id)} onChange={refresh} />
+                <PropertyRow key={p.id} p={p} cols={visibleCols} open={expandedPropertyId === p.id}
+                  onOpen={() => onOpenProperty(p.id)} onChange={refresh} />
               ))}
             </tbody>
           </table>
         </div>
       )}
 
-      <div className="mono" style={{ textAlign: "center", color: "var(--muted)", fontSize: 11, marginTop: 26 }}>
-        Your data · stored in your own database
-      </div>
-
       {importing && <ImportModal markets={markets} onClose={() => setImporting(false)} onDone={() => { setImporting(false); refresh(); }} />}
     </div>
   );
 }
 
-/* ---------------- property row + detail ---------------- */
-function PropertyRow({ p, cols, today, open, onToggle, onChange }) {
+/* ---------------- property row (table line only — detail lives in PropertyModal) ---------------- */
+function PropertyRow({ p, cols, open, onOpen, onChange }) {
+  const patch = (body) => api.send(`/api/properties/${p.id}`, "PATCH", body).then(onChange);
+  return (
+    <tr className="tbl-row" style={open ? { background: "var(--surface2)" } : undefined}>
+      <td className="tbl-ctl">
+        <Star size={15} style={{ cursor: "pointer", color: p.active ? "var(--amber)" : "var(--line)", fill: p.active ? "var(--amber)" : "none" }}
+          onClick={() => patch({ active: !p.active })} title={p.active ? "On desk" : "Promote to desk"} />
+      </td>
+      {cols.map((c) => (
+        <td key={c.field} style={{ textAlign: c.num ? "right" : "left" }}>
+          {c.type === "status" ? (
+            <select className="cell-sel" value={p.status} onChange={(e) => patch({ status: e.target.value })} style={{ color: STATUSES[p.status] }}>
+              {Object.keys(STATUSES).map((s) => <option key={s} style={{ color: "var(--ink)" }}>{s}</option>)}
+            </select>
+          ) : c.type === "owner" ? (
+            p.owner_id ? (
+              <button className="link" style={{ padding: "6px 10px", color: "var(--teal)" }} onClick={onOpen} title="Open owner">
+                <User size={12} /> {p.linked_owner_name || "Owner"}
+              </button>
+            ) : (
+              <button className="link" style={{ padding: "6px 10px", color: "var(--muted)" }} onClick={onOpen} title="Link an owner">+ link</button>
+            )
+          ) : (
+            <CellEdit value={colVal(p, c)} type={c.type} num={c.num} onSave={(v) => patch(colPatch(c, v))} />
+          )}
+        </td>
+      ))}
+      <td className="tbl-ctl">
+        <button className="cell-exp" onClick={onOpen} title="Details">
+          <ChevronRight size={16} style={{ color: "var(--muted)" }} />
+        </button>
+      </td>
+    </tr>
+  );
+}
+
+/* ---------------- property detail modal ---------------- */
+function PropertyModal({ id, onClose, onChange, onOpenOwner }) {
   const [detail, setDetail] = useState(null);
+  const today = todayStr();
   const [draft, setDraft] = useState({ channel: "Call", note: "", date: today });
-  useEffect(() => { if (open) api.get(`/api/properties/${p.id}`).then(setDetail); else setDetail(null); }, [open, p.id]);
+  const load = useCallback(() => api.get(`/api/properties/${id}`).then(setDetail), [id]);
+  useEffect(() => { load(); }, [load]);
   useEffect(() => {
-    if (!open) return;
-    const onKey = (e) => { if (e.key === "Escape") onToggle(); };
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, onToggle]);
+  }, [onClose]);
 
-  const patch = (body) => api.send(`/api/properties/${p.id}`, "PATCH", body).then(() => { onChange(); if (open) api.get(`/api/properties/${p.id}`).then(setDetail); });
-  const reload = () => { api.get(`/api/properties/${p.id}`).then(setDetail); onChange(); };
-  const logTouch = () => { if (!draft.note.trim()) return; api.send(`/api/properties/${p.id}/touch`, "POST", { touch_date: draft.date, channel: draft.channel, note: draft.note.trim() }).then(() => { setDraft((d) => ({ ...d, note: "" })); api.get(`/api/properties/${p.id}`).then(setDetail); onChange(); }); };
+  const patch = (body) => api.send(`/api/properties/${id}`, "PATCH", body).then(() => { onChange(); load(); });
+  const reload = () => { load(); onChange(); };
+  const logTouch = () => { if (!draft.note.trim()) return; api.send(`/api/properties/${id}/touch`, "POST", { touch_date: draft.date, channel: draft.channel, note: draft.note.trim() }).then(() => { setDraft((d) => ({ ...d, note: "" })); reload(); }); };
 
-  return (
-    <>
-      <tr className="tbl-row" style={open ? { background: "var(--surface2)" } : undefined}>
-        <td className="tbl-ctl">
-          <Star size={15} style={{ cursor: "pointer", color: p.active ? "var(--amber)" : "var(--line)", fill: p.active ? "var(--amber)" : "none" }}
-            onClick={() => patch({ active: !p.active })} title={p.active ? "On desk" : "Promote to desk"} />
-        </td>
-        {cols.map((c) => (
-          <td key={c.field} style={{ textAlign: c.num ? "right" : "left" }}>
-            {c.type === "status" ? (
-              <select className="cell-sel" value={p.status} onChange={(e) => patch({ status: e.target.value })} style={{ color: STATUSES[p.status] }}>
-                {Object.keys(STATUSES).map((s) => <option key={s} style={{ color: "var(--ink)" }}>{s}</option>)}
-              </select>
-            ) : (
-              <CellEdit value={colVal(p, c)} type={c.type} num={c.num} onSave={(v) => patch(colPatch(c, v))} />
+  return createPortal(
+    <div className="modal-bg" onClick={onClose}>
+      <div className="card detail-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="detail-head">
+          <div style={{ minWidth: 0 }}>
+            <div className="display truncate" style={{ fontSize: 18, fontWeight: 600 }}>{detail?.extra?.["Property Name"] || detail?.address || "…"}</div>
+            {detail && (
+              <a className="head-link truncate" href={mapsUrl(detail)} target="_blank" rel="noopener noreferrer" style={{ display: "block", fontSize: 12, marginTop: 2 }}>
+                {detail.address}{detail.market_name ? ` · ${detail.market_name}` : ""}
+              </a>
             )}
-          </td>
-        ))}
-        <td className="tbl-ctl">
-          <button className="cell-exp" onClick={onToggle} title="Details">
-            {open ? <ChevronDown size={16} style={{ color: "var(--inkSoft)" }} /> : <ChevronRight size={16} style={{ color: "var(--muted)" }} />}
-          </button>
-        </td>
-      </tr>
-
-      {open && createPortal(
-        <div className="modal-bg" onClick={onToggle}>
-          <div className="card detail-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="detail-head">
-              <div style={{ minWidth: 0 }}>
-                <div className="display truncate" style={{ fontSize: 18, fontWeight: 600 }}>{p.extra?.["Property Name"] || p.address}</div>
-                <a className="head-link truncate" href={mapsUrl(p)} target="_blank" rel="noopener noreferrer" style={{ display: "block", fontSize: 12, marginTop: 2 }}>
-                  {p.address}{p.market_name ? ` · ${p.market_name}` : ""}
-                </a>
-                <WebsiteLink value={p.extra?.["Website"]} onSave={(v) => patch({ extra: { Website: v } })} />
-              </div>
-              <button className="link" onClick={onToggle} style={{ flexShrink: 0 }}><X size={18} /></button>
+            {detail && <WebsiteLink value={detail.extra?.["Website"]} onSave={(v) => patch({ extra: { Website: v } })} />}
+          </div>
+          <button className="link" onClick={onClose} style={{ flexShrink: 0 }}><X size={18} /></button>
+        </div>
+        {detail ? (
+          <div className="detail-body">
+            <div style={{ fontSize: 13, display: "flex", flexDirection: "column", gap: 8 }}>
+              <Editable icon={<Building2 size={13} />} value={detail.unit_count ?? ""} ph="Units" onSave={(v) => patch({ unit_count: v })} />
+              <Editable icon={<Tag size={13} />} value={detail.extra?.["Rent Type"] ?? ""} ph="Rent type" onSave={(v) => patch({ extra: { "Rent Type": v } })} />
+              <Editable icon={<Calendar size={13} />} value={detail.extra?.["Year Built"] ?? ""} ph="Year built" onSave={(v) => patch({ extra: { "Year Built": v } })} />
             </div>
-            {detail ? (
-              <div className="detail-body">
-                <div style={{ fontSize: 13, display: "flex", flexDirection: "column", gap: 8 }}>
-                  <Editable icon={<Building2 size={13} />} value={detail.unit_count ?? ""} ph="Units" onSave={(v) => patch({ unit_count: v })} />
-                  <Editable icon={<Tag size={13} />} value={detail.extra?.["Rent Type"] ?? ""} ph="Rent type" onSave={(v) => patch({ extra: { "Rent Type": v } })} />
-                  <Editable icon={<Calendar size={13} />} value={detail.extra?.["Year Built"] ?? ""} ph="Year built" onSave={(v) => patch({ extra: { "Year Built": v } })} />
-                </div>
 
-                <div style={{ fontSize: 13, display: "flex", flexDirection: "column", gap: 8 }}>
-                  <Editable icon={<User size={13} />} value={detail.owner_name} ph="Owner name" onSave={(v) => patch({ owner_name: v })} />
-                  <Editable icon={<Phone size={13} />} value={detail.phone} ph="Phone" onSave={(v) => patch({ phone: v })} />
-                  <Editable icon={<Mail size={13} />} value={detail.email} ph="Email" onSave={(v) => patch({ email: v })} />
-                </div>
+            <div style={{ fontSize: 13, display: "flex", flexDirection: "column", gap: 8 }}>
+              <Editable icon={<User size={13} />} value={detail.owner_name} ph="Owner name" onSave={(v) => patch({ owner_name: v })} />
+              <Editable icon={<Phone size={13} />} value={detail.phone} ph="Phone" onSave={(v) => patch({ phone: v })} />
+              <Editable icon={<Mail size={13} />} value={detail.email} ph="Email" onSave={(v) => patch({ email: v })} />
+            </div>
 
-                <RentTable value={detail.rent_table} extra={detail.extra} onSave={(rows) => patch({ rent_table: rows })} />
+            <div>
+              <div className="mono" style={{ fontSize: 11, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--inkSoft)", marginBottom: 6 }}>Linked owner</div>
+              <OwnerLink property={detail} onSaved={reload} onOpenOwner={onOpenOwner} />
+            </div>
 
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                  <select className="in" style={{ width: "auto" }} value={detail.status} onChange={(e) => patch({ status: e.target.value })}>
-                    {Object.keys(STATUSES).map((s) => <option key={s}>{s}</option>)}
-                  </select>
-                  <input className="in" style={{ width: "auto" }} type="date" value={detail.next_follow_up || ""} onChange={(e) => patch({ next_follow_up: e.target.value })} />
-                  {[["+3d", 3], ["+1w", 7], ["+2w", 14], ["+1mo", 30]].map(([l, n]) => (
-                    <button key={l} className="pill" style={{ color: "var(--teal)" }} onClick={() => patch({ next_follow_up: addDays(n) })}>{l}</button>
-                  ))}
-                </div>
+            <RentTable value={detail.rent_table} extra={detail.extra} onSave={(rows) => patch({ rent_table: rows })} />
 
-                <NotesBox value={detail.notes} onSave={(v) => patch({ notes: v })} />
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <select className="in" style={{ width: "auto" }} value={detail.status} onChange={(e) => patch({ status: e.target.value })}>
+                {Object.keys(STATUSES).map((s) => <option key={s}>{s}</option>)}
+              </select>
+              <input className="in" style={{ width: "auto" }} type="date" value={detail.next_follow_up || ""} onChange={(e) => patch({ next_follow_up: e.target.value })} />
+              {[["+3d", 3], ["+1w", 7], ["+2w", 14], ["+1mo", 30]].map(([l, n]) => (
+                <button key={l} className="pill" style={{ color: "var(--teal)" }} onClick={() => patch({ next_follow_up: addDays(n) })}>{l}</button>
+              ))}
+            </div>
 
-                {/* log a touch */}
-                <div style={{ background: "var(--surface2)", border: "1px solid var(--lineSoft)", borderRadius: 10, padding: 12 }}>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
-                    {Object.entries(CHANNELS).map(([name, { Icon, color }]) => { const on = draft.channel === name; return (
-                      <button key={name} onClick={() => setDraft((d) => ({ ...d, channel: name }))}
-                        style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, borderRadius: 7, padding: "5px 9px", cursor: "pointer",
-                          border: `1px solid ${on ? color : "var(--line)"}`, background: on ? color : "transparent", color: on ? "#fff" : "var(--inkSoft)" }}>
-                        <Icon size={13} /> {name}</button>); })}
-                    <input className="in" style={{ width: "auto", marginLeft: "auto" }} type="date" value={draft.date} onChange={(e) => setDraft((d) => ({ ...d, date: e.target.value }))} />
-                  </div>
-                  <textarea className="in" rows={2} placeholder="Call notes (voicemail, spoke 5 min, send comps…)" value={draft.note} onChange={(e) => setDraft((d) => ({ ...d, note: e.target.value }))} />
-                  <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
-                    <button className="btn btn-ink" disabled={!draft.note.trim()} style={{ opacity: draft.note.trim() ? 1 : .5 }} onClick={logTouch}>Log touch</button>
-                  </div>
-                </div>
+            <NotesBox value={detail.notes} onSave={(v) => patch({ notes: v })} />
 
-                {detail.touches?.length > 0 && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {detail.touches.map((e) => <TouchRow key={e.id} t={e} onChanged={reload} />)}
-                  </div>
-                )}
+            {/* log a touch */}
+            <div style={{ background: "var(--surface2)", border: "1px solid var(--lineSoft)", borderRadius: 10, padding: 12 }}>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
+                {Object.entries(CHANNELS).map(([name, { Icon, color }]) => { const on = draft.channel === name; return (
+                  <button key={name} onClick={() => setDraft((d) => ({ ...d, channel: name }))}
+                    style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, borderRadius: 7, padding: "5px 9px", cursor: "pointer",
+                      border: `1px solid ${on ? color : "var(--line)"}`, background: on ? color : "transparent", color: on ? "#fff" : "var(--inkSoft)" }}>
+                    <Icon size={13} /> {name}</button>); })}
+                <input className="in" style={{ width: "auto", marginLeft: "auto" }} type="date" value={draft.date} onChange={(e) => setDraft((d) => ({ ...d, date: e.target.value }))} />
+              </div>
+              <textarea className="in" rows={2} placeholder="Call notes (voicemail, spoke 5 min, send comps…)" value={draft.note} onChange={(e) => setDraft((d) => ({ ...d, note: e.target.value }))} />
+              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
+                <button className="btn btn-ink" disabled={!draft.note.trim()} style={{ opacity: draft.note.trim() ? 1 : .5 }} onClick={logTouch}>Log touch</button>
+              </div>
+            </div>
 
-                <Attachments propertyId={p.id} items={detail.attachments || []} onChanged={reload} />
+            {detail.touches?.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {detail.touches.map((e) => <TouchRow key={e.id} t={e} onChanged={reload} />)}
+              </div>
+            )}
 
-                {detail.extra && (
-                  <details style={{ border: "1px solid var(--lineSoft)", borderRadius: 10, padding: "10px 12px" }}>
-                    <summary style={{ cursor: "pointer", fontSize: 11, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--inkSoft)" }}>All property data</summary>
-                    <div style={{ display: "grid", gridTemplateColumns: "minmax(130px, 38%) 1fr", gap: "6px 14px", marginTop: 12, fontSize: 13 }}>
-                      {groupedExtra(detail).map((g) => (
-                        <React.Fragment key={g.title}>
-                          <div style={{ gridColumn: "1 / -1", fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--rust)", marginTop: 8, paddingBottom: 4, borderBottom: "1px solid var(--lineSoft)" }}>{g.title}</div>
-                          {g.fields.map((k) => (
-                            <React.Fragment key={k}>
-                              <div style={{ color: "var(--muted)", alignSelf: "center" }}>{k}</div>
-                              <input className="in" defaultValue={String(detail.extra[k] ?? "")}
-                                onBlur={(e) => { if (e.target.value !== String(detail.extra[k] ?? "")) patch({ extra: { [k]: e.target.value } }); }} />
-                            </React.Fragment>
-                          ))}
+            <Attachments propertyId={id} items={detail.attachments || []} onChanged={reload} />
+
+            {detail.extra && (
+              <details style={{ border: "1px solid var(--lineSoft)", borderRadius: 10, padding: "10px 12px" }}>
+                <summary style={{ cursor: "pointer", fontSize: 11, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--inkSoft)" }}>All property data</summary>
+                <div style={{ display: "grid", gridTemplateColumns: "minmax(130px, 38%) 1fr", gap: "6px 14px", marginTop: 12, fontSize: 13 }}>
+                  {groupedExtra(detail).map((g) => (
+                    <React.Fragment key={g.title}>
+                      <div style={{ gridColumn: "1 / -1", fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--rust)", marginTop: 8, paddingBottom: 4, borderBottom: "1px solid var(--lineSoft)" }}>{g.title}</div>
+                      {g.fields.map((k) => (
+                        <React.Fragment key={k}>
+                          <div style={{ color: "var(--muted)", alignSelf: "center" }}>{k}</div>
+                          <input className="in" defaultValue={String(detail.extra[k] ?? "")}
+                            onBlur={(e) => { if (e.target.value !== String(detail.extra[k] ?? "")) patch({ extra: { [k]: e.target.value } }); }} />
                         </React.Fragment>
                       ))}
-                    </div>
-                    <AddField onAdd={(name, val) => patch({ extra: { [name]: val }, orderAppend: name })} />
-                  </details>
-                )}
-
-                <div style={{ display: "flex", justifyContent: "space-between" }}>
-                  <button className="link" onClick={() => patch({ active: !detail.active })}>
-                    <Star size={13} /> {detail.active ? "Remove from desk" : "Promote to desk"}
-                  </button>
-                  <button className="link" onClick={() => api.send(`/api/properties/${p.id}`, "DELETE").then(() => { onToggle(); onChange(); })}><Trash2 size={13} /> Delete</button>
+                    </React.Fragment>
+                  ))}
                 </div>
-              </div>
-            ) : (
-              <div style={{ padding: 24, color: "var(--inkSoft)", fontSize: 13 }}>Loading…</div>
+                <AddField onAdd={(name, val) => patch({ extra: { [name]: val }, orderAppend: name })} />
+              </details>
             )}
+
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <button className="link" onClick={() => patch({ active: !detail.active })}>
+                <Star size={13} /> {detail.active ? "Remove from desk" : "Promote to desk"}
+              </button>
+              <button className="link" onClick={() => api.send(`/api/properties/${id}`, "DELETE").then(() => { onChange(); onClose(); })}><Trash2 size={13} /> Delete</button>
+            </div>
           </div>
-        </div>,
-        document.body
+        ) : (
+          <div style={{ padding: 24, color: "var(--inkSoft)", fontSize: 13 }}>Loading…</div>
+        )}
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+/* ---------------- owner link combobox (used inside property modal) ---------------- */
+function OwnerLink({ property, onSaved, onOpenOwner }) {
+  const [q, setQ] = useState("");
+  const [results, setResults] = useState([]);
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState(property.owner_name || "");
+  useEffect(() => { setNewName(property.owner_name || ""); }, [property.owner_name]);
+  useEffect(() => {
+    if (!q.trim()) { setResults([]); return; }
+    const t = setTimeout(() => { api.get(`/api/owners?q=${encodeURIComponent(q.trim())}`).then(setResults).catch(() => {}); }, 200);
+    return () => clearTimeout(t);
+  }, [q]);
+
+  const link = (ownerId) => api.send(`/api/properties/${property.id}`, "PATCH", { owner_id: ownerId }).then(() => { setQ(""); setResults([]); onSaved(); });
+  const unlink = () => api.send(`/api/properties/${property.id}`, "PATCH", { owner_id: "" }).then(onSaved);
+  const createAndLink = async () => {
+    const name = newName.trim();
+    if (!name) return;
+    const { id } = await api.send("/api/owners", "POST", { name });
+    await link(id);
+    setCreating(false);
+  };
+
+  if (property.owner_id) {
+    return (
+      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+        <button className="link" style={{ color: "var(--teal)" }} onClick={() => onOpenOwner(property.owner_id)}>
+          <User size={13} /> {property.linked_owner_name || "View owner"}
+        </button>
+        <button className="link" onClick={unlink}>Unlink</button>
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <input className="in" placeholder="Search owners by name…" value={q} onChange={(e) => setQ(e.target.value)} />
+      {results.length > 0 && (
+        <div className="colpop" style={{ position: "static", width: "auto" }}>
+          {results.map((r) => (
+            <button key={r.id} className="link" style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px" }} onClick={() => link(r.id)}>{r.name}</button>
+          ))}
+        </div>
       )}
-    </>
+      {property.owner_name && !q.trim() && (
+        creating ? (
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <input className="in" value={newName} onChange={(e) => setNewName(e.target.value)} />
+            <button className="btn btn-ink" onClick={createAndLink}>Create</button>
+            <button className="link" onClick={() => setCreating(false)}>Cancel</button>
+          </div>
+        ) : (
+          <button className="link" style={{ color: "var(--teal)" }} onClick={() => setCreating(true)}>+ Create new owner named "{property.owner_name}"</button>
+        )
+      )}
+    </div>
+  );
+}
+
+/* ---------------- owners view ---------------- */
+function OwnersView({ refreshKey, bump, onOpenOwner }) {
+  const [owners, setOwners] = useState([]);
+  const [query, setQuery] = useState("");
+  const [status, setStatus] = useState("All");
+  const [sort, setSort] = useState({ key: "next_follow_up", dir: "asc" });
+  const [adding, setAdding] = useState(false);
+
+  const load = useCallback(() => api.get("/api/owners").then(setOwners).catch(() => {}), []);
+  useEffect(() => { load(); }, [load, refreshKey]);
+
+  const toggleSort = (key) => setSort((s) => (s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" }));
+
+  const filtered = useMemo(() => {
+    let list = owners;
+    if (status !== "All") list = list.filter((o) => o.status === status);
+    if (query.trim()) { const q = query.trim().toLowerCase(); list = list.filter((o) => o.name.toLowerCase().includes(q)); }
+    return list;
+  }, [owners, status, query]);
+
+  const sorted = useMemo(() => {
+    const { key, dir } = sort, mul = dir === "asc" ? 1 : -1;
+    return [...filtered].sort((a, b) => {
+      let av = a[key], bv = b[key];
+      if (key === "active") { av = av ? 1 : 0; bv = bv ? 1 : 0; }
+      if (av == null) av = "";
+      if (bv == null) bv = "";
+      if (typeof av === "number" && typeof bv === "number") return (av - bv) * mul;
+      return String(av).localeCompare(String(bv)) * mul;
+    });
+  }, [filtered, sort]);
+
+  const refresh = () => { load(); bump(); };
+  const COLS = [
+    ["name", "Name"], ["status", "Status"], ["property_count", "Properties"],
+    ["total_units", "Units"], ["last_touch", "Last touch"], ["next_follow_up", "Follow-up"], ["active", "Desk"],
+  ];
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        <div style={{ position: "relative", flex: 1 }}>
+          <Search size={15} style={{ position: "absolute", left: 10, top: 10, color: "var(--muted)" }} />
+          <input className="in" style={{ paddingLeft: 32 }} placeholder="Search owners…" value={query} onChange={(e) => setQuery(e.target.value)} />
+        </div>
+        <button className="btn" style={{ background: "var(--surface)", border: "1px solid var(--line)", color: "var(--ink)", display: "flex", alignItems: "center", gap: 6 }} onClick={() => setAdding((v) => !v)}>
+          <Plus size={16} /> Add owner
+        </button>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+        {["All", ...Object.keys(STATUSES)].map((s) => {
+          const on = status === s, col = STATUSES[s] || "var(--ink)";
+          return <button key={s} className="pill" onClick={() => setStatus(s)}
+            style={{ border: `1px solid ${on ? col : "var(--line)"}`, background: on ? col : "transparent", color: on ? "#fff" : "var(--inkSoft)" }}>{s}</button>;
+        })}
+      </div>
+
+      {adding && <AddOwnerForm onDone={() => { setAdding(false); refresh(); }} onCancel={() => setAdding(false)} />}
+
+      {owners.length === 0 ? (
+        <div style={{ textAlign: "center", color: "var(--inkSoft)", fontSize: 13, padding: "28px 0" }}>No owners yet — link one from a property, or add one here.</div>
+      ) : (
+        <div className="tbl-wrap">
+          <table className="tbl">
+            <thead>
+              <tr>
+                {COLS.map(([key, label]) => (
+                  <th key={key} onClick={() => toggleSort(key)} style={{ cursor: "pointer" }} title="Sort">
+                    {label}{sort.key === key ? (sort.dir === "asc" ? " ▲" : " ▼") : ""}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.length === 0 ? (
+                <tr><td colSpan={COLS.length} style={{ padding: "22px", textAlign: "center", color: "var(--inkSoft)", fontSize: 13 }}>No owners match.</td></tr>
+              ) : sorted.map((o) => <OwnerRow key={o.id} o={o} onOpen={() => onOpenOwner(o.id)} onChange={refresh} />)}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OwnerRow({ o, onOpen, onChange }) {
+  const patch = (body) => api.send(`/api/owners/${o.id}`, "PATCH", body).then(onChange);
+  return (
+    <tr className="tbl-row">
+      <td><button className="link" style={{ padding: "7px 10px", color: "var(--ink)", fontWeight: 600 }} onClick={onOpen}>{o.name}</button></td>
+      <td style={{ padding: "7px 10px", color: STATUSES[o.status] }}>{o.status}</td>
+      <td style={{ padding: "7px 10px", textAlign: "right" }}>{o.property_count}</td>
+      <td style={{ padding: "7px 10px", textAlign: "right" }}>{o.total_units}</td>
+      <td style={{ padding: "7px 10px" }}>{fmtDate(o.last_touch)}</td>
+      <td style={{ padding: "7px 10px" }}>{fmtDate(o.next_follow_up)}</td>
+      <td className="tbl-ctl">
+        <Star size={15} style={{ cursor: "pointer", color: o.active ? "var(--amber)" : "var(--line)", fill: o.active ? "var(--amber)" : "none" }}
+          onClick={() => patch({ active: !o.active })} title={o.active ? "On desk" : "Add to desk"} />
+      </td>
+    </tr>
+  );
+}
+
+function AddOwnerForm({ onDone, onCancel }) {
+  const [f, setF] = useState({ name: "", phone: "", email: "", mailing_address: "" });
+  const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
+  const submit = () => { if (!f.name.trim()) return; api.send("/api/owners", "POST", { ...f, name: f.name.trim() }).then(onDone); };
+  return (
+    <div className="card" style={{ borderColor: "var(--rust)", padding: 16, marginBottom: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
+        <span className="mono" style={{ fontSize: 12, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--rustDeep)" }}>New owner</span>
+        <button className="link" onClick={onCancel}><X size={16} /></button>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <input className="in" placeholder="Owner name *" value={f.name} onChange={set("name")} autoFocus onKeyDown={(e) => e.key === "Enter" && submit()} />
+        <div style={{ display: "flex", gap: 8 }}>
+          <input className="in" placeholder="Phone" value={f.phone} onChange={set("phone")} />
+          <input className="in" placeholder="Email" value={f.email} onChange={set("email")} />
+        </div>
+        <input className="in" placeholder="Mailing address" value={f.mailing_address} onChange={set("mailing_address")} />
+      </div>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
+        <button className="btn btn-primary" disabled={!f.name.trim()} style={{ opacity: f.name.trim() ? 1 : .5 }} onClick={submit}>Add owner</button>
+      </div>
+    </div>);
+}
+
+/* ---------------- owner detail modal ---------------- */
+function OwnerModal({ id, onClose, onChange, onOpenProperty }) {
+  const [detail, setDetail] = useState(null);
+  const today = todayStr();
+  const [draft, setDraft] = useState({ channel: "Call", note: "", date: today });
+  const load = useCallback(() => api.get(`/api/owners/${id}`).then(setDetail), [id]);
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const patch = (body) => api.send(`/api/owners/${id}`, "PATCH", body).then(() => { onChange(); load(); });
+  const reload = () => { load(); onChange(); };
+  const logTouch = () => { if (!draft.note.trim()) return; api.send(`/api/owners/${id}/touch`, "POST", { touch_date: draft.date, channel: draft.channel, note: draft.note.trim() }).then(() => { setDraft((d) => ({ ...d, note: "" })); reload(); }); };
+
+  return createPortal(
+    <div className="modal-bg" onClick={onClose}>
+      <div className="card detail-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="detail-head">
+          <div style={{ minWidth: 0 }}>
+            <Editable icon={<Users size={13} />} value={detail?.name || ""} ph="Owner name" onSave={(v) => patch({ name: v })} />
+          </div>
+          <button className="link" onClick={onClose} style={{ flexShrink: 0 }}><X size={18} /></button>
+        </div>
+        {detail ? (
+          <div className="detail-body">
+            <div style={{ fontSize: 13, display: "flex", flexDirection: "column", gap: 8 }}>
+              <Editable icon={<Phone size={13} />} value={detail.phone} ph="Phone" onSave={(v) => patch({ phone: v })} />
+              <Editable icon={<Mail size={13} />} value={detail.email} ph="Email" onSave={(v) => patch({ email: v })} />
+              <Editable icon={<MapPin size={13} />} value={detail.mailing_address} ph="Mailing address" onSave={(v) => patch({ mailing_address: v })} />
+            </div>
+
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <select className="in" style={{ width: "auto" }} value={detail.status} onChange={(e) => patch({ status: e.target.value })}>
+                {Object.keys(STATUSES).map((s) => <option key={s}>{s}</option>)}
+              </select>
+              <input className="in" style={{ width: "auto" }} type="date" value={detail.next_follow_up || ""} onChange={(e) => patch({ next_follow_up: e.target.value })} />
+              {[["+3d", 3], ["+1w", 7], ["+2w", 14], ["+1mo", 30]].map(([l, n]) => (
+                <button key={l} className="pill" style={{ color: "var(--teal)" }} onClick={() => patch({ next_follow_up: addDays(n) })}>{l}</button>
+              ))}
+            </div>
+
+            <NotesBox value={detail.notes} onSave={(v) => patch({ notes: v })} />
+
+            {/* log a touch */}
+            <div style={{ background: "var(--surface2)", border: "1px solid var(--lineSoft)", borderRadius: 10, padding: 12 }}>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
+                {Object.entries(CHANNELS).map(([name, { Icon, color }]) => { const on = draft.channel === name; return (
+                  <button key={name} onClick={() => setDraft((d) => ({ ...d, channel: name }))}
+                    style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, borderRadius: 7, padding: "5px 9px", cursor: "pointer",
+                      border: `1px solid ${on ? color : "var(--line)"}`, background: on ? color : "transparent", color: on ? "#fff" : "var(--inkSoft)" }}>
+                    <Icon size={13} /> {name}</button>); })}
+                <input className="in" style={{ width: "auto", marginLeft: "auto" }} type="date" value={draft.date} onChange={(e) => setDraft((d) => ({ ...d, date: e.target.value }))} />
+              </div>
+              <textarea className="in" rows={2} placeholder="Call notes (voicemail, spoke 5 min, send comps…)" value={draft.note} onChange={(e) => setDraft((d) => ({ ...d, note: e.target.value }))} />
+              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
+                <button className="btn btn-ink" disabled={!draft.note.trim()} style={{ opacity: draft.note.trim() ? 1 : .5 }} onClick={logTouch}>Log touch</button>
+              </div>
+            </div>
+
+            {detail.touches?.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {detail.touches.map((e) => <TouchRow key={e.id} t={e} onChanged={reload} />)}
+              </div>
+            )}
+
+            <div>
+              <div className="mono" style={{ fontSize: 11, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--inkSoft)", marginBottom: 6 }}>Linked properties</div>
+              {detail.properties?.length > 0 ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  {detail.properties.map((p) => (
+                    <button key={p.id} className="link" style={{ justifyContent: "space-between", padding: "6px 8px", border: "1px solid var(--lineSoft)", borderRadius: 8 }} onClick={() => onOpenProperty(p.id)}>
+                      <span className="truncate" style={{ color: "var(--ink)" }}>{p.address}</span>
+                      <span className="mono" style={{ color: "var(--muted)", flexShrink: 0, marginLeft: 8 }}>{p.unit_count ?? "—"} units</span>
+                    </button>
+                  ))}
+                </div>
+              ) : <div style={{ color: "var(--muted)", fontSize: 13 }}>No properties linked yet.</div>}
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <button className="link" onClick={() => patch({ active: !detail.active })}>
+                <Star size={13} /> {detail.active ? "Remove from desk" : "Add to desk"}
+              </button>
+              <button className="link" onClick={() => api.send(`/api/owners/${id}`, "DELETE").then(() => { onChange(); onClose(); })}><Trash2 size={13} /> Delete</button>
+            </div>
+          </div>
+        ) : (
+          <div style={{ padding: 24, color: "var(--inkSoft)", fontSize: 13 }}>Loading…</div>
+        )}
+      </div>
+    </div>,
+    document.body
   );
 }
 
@@ -784,7 +1145,7 @@ function ImportModal({ markets, onClose, onDone }) {
         {result ? (
           <div>
             {result.error ? <div style={{ color: "var(--rust)" }}>Import failed. Check your file and try again.</div>
-              : <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 15 }}><Check size={18} style={{ color: "var(--green)" }} /> Imported {result.imported} properties.</div>}
+              : <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 15 }}><Check size={18} style={{ color: "var(--green)" }} /> Imported {result.imported} properties{result.ownersCreated ? ` · created ${result.ownersCreated} new owners` : ""}.</div>}
             <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 18 }}>
               <button className="btn btn-primary" onClick={onDone}>Done</button>
             </div>

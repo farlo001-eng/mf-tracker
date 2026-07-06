@@ -1,10 +1,12 @@
-## File Map (2026-06-03)
+## File Map (2026-07-06)
 
 ### Root
   package.json         — Node project manifest; scripts: build (vite), start (node server.js)
   package-lock.json    — Lockfile
-  server.js            — Express API server; auth, markets, properties CRUD, bulk import
-  db.js                — pg Pool, uid(), ensureSchema() — runs SCHEMA on boot
+  server.js            — Express API server; auth, markets, properties CRUD, owners CRUD
+                          + merge, bulk import (links/creates owners per row)
+  db.js                — pg Pool, uid(), ensureSchema() — runs SCHEMA on boot, then runs
+                          the one-time owners backfill migration (guarded, empty-table check)
   vite.config.js       — Vite config (proxies /api to localhost:3000 in dev)
   railway.json         — Railway deployment config
   .gitignore
@@ -17,7 +19,11 @@
   index.html           — Vite entry HTML
   src/
     main.jsx           — React entry point
-    App.jsx            — Full single-file React app (Login, Tracker, PropertyRow, ImportModal, …)
+    App.jsx            — Full single-file React app: Login, Tracker (top-level Desk/
+                          Properties/Owners nav), DeskView, PropertiesView, PropertyRow,
+                          PropertyModal, OwnerLink, OwnersView, OwnerRow, AddOwnerForm,
+                          OwnerModal, ImportModal, shared helpers (NotesBox, RentTable,
+                          TouchRow, Attachments, CellEdit, Editable, AddForm, …)
     styles.css         — CSS custom properties + utility classes
 
 ### claude-context/  (meta — not deployed)

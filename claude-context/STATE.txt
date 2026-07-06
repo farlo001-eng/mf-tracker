@@ -1,96 +1,71 @@
-## Current State (2026-06-08)
+## Current State (2026-07-06)
 
-The property detail modal has been significantly overhauled. Imported data now stays
-intact — every field is shown (even blank), editable, in original spreadsheet order.
+Owner tracking added. Owners are now first-class records, distinct from the free-text
+`owner_name` field that stays on properties (imported data remains sacred/untouched).
+Properties link to owners via a nullable `owner_id` FK.
 
-### Modal layout structure
-```
-.modal-bg (fixed overlay, z-index 50)
-  └── .card.detail-modal (720px, max-height 88vh, flex column)
-        ├── .detail-head
-        │     ├── Property Name (display font, large)
-        │     ├── <a> Maps link (address · market) — opens Google Maps
-        │     ├── WebsiteLink (Globe icon; clickable link or "Add website")
-        │     └── X close button
-        └── .detail-body (scrollable, flex column, gap 14)
-              ├── Key stats (units / rent type / year built)
-              ├── Owner / phone / email (Editable fields)
-              ├── RentTable (unit type, # units, avg SF, asking rent, $/SF)
-              ├── Status / follow-up / quick-date pills
-              ├── NotesBox
-              ├── Touch logger
-              ├── Touch history
-              └── "All property data" (expandable <details>)
-                    ├── All extra fields in import order (all shown, even blank)
-                    └── AddField component (add new key/value pair)
-```
+### DB additions (db.js)
+- `owners` table: id, name, status, active, phone, email, mailing_address,
+  next_follow_up, notes, created_at
+- `properties.owner_id` — nullable FK to owners, `on delete set null`
+- `touches.owner_id` — nullable FK to owners, `on delete cascade`; `touches.property_id`
+  is now nullable too. `touches_one_target` CHECK constraint enforces exactly one of
+  property_id / owner_id is set per touch row (added via a guarded `do $$ ... $$` block
+  so re-running ensureSchema on every boot doesn't error on the second run).
+- `idx_props_owner`, `idx_owners_active`, `idx_touches_owner` indexes
+- One-time backfill `migrateOwnersFromPropertyNames()` runs inside `ensureSchema()`,
+  guarded to only fire while the `owners` table is still empty: creates one owner per
+  distinct (case-insensitive, trimmed) `owner_name` across existing properties (first-seen
+  casing wins), links matching properties, logs counts created/linked.
 
-### New DB columns
-- `extra_order jsonb not null default '[]'` — tracks import column order per property
-- `rent_table jsonb not null default '[]'` — stores rent table rows per property
+### Server additions (server.js)
+- Full owners CRUD: `GET/POST /api/owners` (list has property_count/total_units/last_touch/
+  last_channel rollups; `?q=` does a lightweight ilike name search for the combobox),
+  `GET/PATCH/DELETE /api/owners/:id` (detail includes linked `properties[]` and `touches[]`),
+  `POST /api/owners/:id/touch`, `POST /api/owners/merge` (`{survivorId, loserIds}` —
+  repoints properties/touches then deletes losers, transactional).
+- `PATCH /api/properties/:id` allows `owner_id` now.
+- `GET /api/properties` and `GET /api/properties/:id` both join `owners` and return
+  `linked_owner_name` (list) / `linked_owner_name` + `market_name` (detail).
+- `POST /api/import` links/creates an owner per row from `owner_name` (case-insensitive
+  match, per-request in-memory cache to avoid duplicate lookups within one import),
+  returns `ownersCreated` alongside `imported`.
 
-### New server behaviour
-- GET /api/properties returns `p.extra_order`
-- POST /api/import captures `req.body.order` (header array) and stores in `extra_order`
-- PATCH /api/properties/:id supports:
-  - `orderAppend` (string) — appends a single key to `extra_order` via jsonb concat
-  - `rent_table` (array) — replaces the rent table
+### Client additions (App.jsx)
+- Top-level nav: **Desk / Properties / Owners** tabs, owned by `Tracker`. `Tracker` also
+  owns `expandedPropertyId` / `expandedOwnerId` (so any view can open either overlay) and
+  a `refreshKey`/`bump()` pair so mutations in one view refresh data in the others.
+- `DeskView` — unified due/overdue list merging active owners + active properties
+  (client-side merge + sort by next_follow_up), badge per row ("Owner"/"Property"),
+  channel icon, click opens the right overlay.
+- `PropertiesView` — the old Tracker body (market filter, Desk/Warehouse sub-tab, search,
+  columns picker, filters, status pills, table). `PropertyRow` no longer owns modal state;
+  it just renders the row and calls `onOpen()`. New `owner_id` column (type `"owner"`,
+  in `CORE_COLS`/`DEFAULT_COLS`) renders a clickable owner chip or a muted "+ link"
+  affordance, both open the property modal.
+- `PropertyModal` — extracted from the old inline PropertyRow modal so it can be opened
+  from anywhere (Desk, Owners, or the table) by id alone; fetches its own detail. New
+  "Linked owner" section renders `OwnerLink`.
+- `OwnerLink` — combobox: searches `/api/owners?q=`, links on click; if no owner_id and
+  `owner_name` is non-blank, offers "+ Create new owner named '...'" (editable) which
+  POSTs then links; shows chip + "Unlink" once linked.
+- `OwnersView` / `OwnerRow` / `AddOwnerForm` — sortable table (click header toggles
+  asc/desc) mirroring the properties table's visual language; Desk star toggles `active`.
+- `OwnerModal` — same structural/CSS pattern as PropertyModal: editable fields, touch
+  logger + history (reuses `TouchRow` as-is — it already just hits `/api/touches/:id`),
+  linked-properties list (click opens `PropertyModal` for that property), delete.
+- No new CSS was needed — everything reuses `.link`, `.pill`, `.card`, `.tbl*`, `.colpop`,
+  `.row-btn` etc.
 
-### New / changed client components
-- `WebsiteLink` — header sub-component for editable website URL with Globe icon
-- `RentTable` — tabular rent data with type/units/SF/rent columns + $/SF computed;
-  seeds from imported RENT_SEED fields if rent_table is empty; wrapped in `.rent-wrap`
-  div for bordered/rounded container; type column prefilled from RENT_SEED labels
-- `FIELD_GROUPS` / `groupedExtra(d)` — groups extra fields into 7 named sections
-  (Property, Location, Rent & unit mix, Owner as listed, True owner, Sale history,
-  Financing); uncategorised keys fall into an "Additional" section respecting
-  extra_order; replaces flat `orderedExtraKeys` grid in "All property data" panel;
-  section headers are full-width mono/uppercase/rust rows with a lineSoft underline
-- `AddField` — inline form at the bottom of "All property data" to append new keys
-- `orderedExtraKeys(d)` — helper that respects `extra_order` then appends remainder
-- `seedRent(extra)` — maps well-known rent-related import columns to RentTable rows
-- `psf(rent, sf)` — computes $/SF; returns "" if either value is non-numeric
-- `mapsUrl(p)` — builds Google Maps search URL from address + City/State/Zip
-- `siteUrl(v)` — normalises bare domain strings to https:// URLs
-- `extraKeys` useMemo now orders by `extra_order` across all props, then remainder
-
-### CSS additions
-- `.head-link` / `.head-link:hover` — teal link style with rust hover
-- `.rent-tbl` / `.rent-tbl th/td/input` — rent table styles
-- `.rent-psf` — right-aligned mono $/SF column
-
-### Color theme — Slate
-CSS custom properties switched from warm parchment to slate blue-grey:
-`--paper` #e9edf0, `--surface` #fff, `--surface2` #f4f7f9, `--rust` (accent) #41709c
-(steel blue), `--ink` #1d2733. Overlay tints cooled to `rgba(20,28,40,...)`.
-
-### Editable/deletable touches
-- `reload()` helper in `PropertyRow` — re-fetches detail and calls `onChange`
-- `TouchRow` component replaces inline map; view mode shows date/icon/note with
-  Pencil + Trash2 action buttons; edit mode shows channel select, date input,
-  textarea, Save/Cancel
-- Server: `PATCH /api/touches/:id` updates date/channel/note; `DELETE /api/touches/:id`
-  removes the touch; both guarded by the existing auth middleware
-
-### Attachments (added 2026-06-08)
-Files (Excel/PDF, ≤10 MB) are stored as `bytea` in a new `attachments` table.
-Upload path: FileReader → base64 → POST /api/properties/:id/attachments → decode → pg.
-Download: GET /api/attachments/:id streams the buffer with correct Content-Type.
-The `Attachments` component appears in the detail modal just before "All property data".
-
-### DB additions
-- `attachments` table with id, property_id (FK → properties, cascade delete), filename,
-  mime, size, data bytea, created_at
-- `idx_attach_prop` index on attachments(property_id)
-
-### Server additions
-- JSON body limit raised to 20 MB (to fit base64-encoded 10 MB file)
-- POST /api/properties/:id/attachments — upload handler
-- GET /api/attachments/:id — download/stream handler
-- DELETE /api/attachments/:id — delete handler
-- GET /api/properties/:id now returns `attachments` array (metadata only, no data field)
+### Known gap / manual step required
+No `pg_dump`/Railway CLI/`DATABASE_URL` were available in the dev sandbox that built this,
+so the pre-migration production backup (task step 0) was **not** run automatically.
+Before deploying, run:
+`pg_dump $DATABASE_URL > backup_pre_owners_$(date +%Y%m%d).sql` and confirm the file is
+non-empty. The owners backfill migration runs automatically on next boot via
+`ensureSchema()` — it is additive/guarded, but the backup should still happen first.
 
 ### Next step
-No pending work. Possible additions: animated open/close, keyboard navigation between
-rows (← → arrows to move to prev/next property), export/print rent table, attachment
-count badge on property rows.
+No pending code work. Possible additions: merge-duplicate-owners UI (API already
+supports `POST /api/owners/merge`, no frontend yet), keyboard nav between desk rows,
+owner attachments (properties have them, owners don't yet).

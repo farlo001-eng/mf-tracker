@@ -53,6 +53,96 @@ app.post("/api/markets", async (req, res) => {
   res.json({ id });
 });
 
+/* ---------------- owners ---------------- */
+app.get("/api/owners", async (req, res) => {
+  const { q } = req.query;
+  if (q) {
+    const { rows } = await pool.query(
+      `select id, name from owners where name ilike $1 order by name limit 20`,
+      [`%${q}%`]
+    );
+    return res.json(rows);
+  }
+  const { rows } = await pool.query(`
+    select o.id, o.name, o.status, o.active, o.phone, o.email, o.mailing_address,
+           to_char(o.next_follow_up, 'YYYY-MM-DD') as next_follow_up, o.notes, o.created_at,
+           count(p.id)::int as property_count,
+           coalesce(sum(p.unit_count), 0)::int as total_units,
+           (select to_char(max(touch_date),'YYYY-MM-DD') from touches t where t.owner_id = o.id) as last_touch,
+           (select channel from touches t where t.owner_id = o.id order by touch_date desc, created_at desc limit 1) as last_channel
+    from owners o left join properties p on p.owner_id = o.id
+    group by o.id
+    order by o.active desc, o.next_follow_up asc nulls last, o.created_at desc
+  `);
+  res.json(rows);
+});
+
+app.post("/api/owners", async (req, res) => {
+  const b = req.body || {}, id = uid();
+  await pool.query(
+    `insert into owners (id, name, status, active, phone, email, mailing_address, next_follow_up, notes)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+    [id, (b.name || "Untitled owner").trim(), b.status || "New", !!b.active, b.phone || "",
+     b.email || "", b.mailing_address || "", b.next_follow_up || null, b.notes || ""]
+  );
+  res.json({ id });
+});
+
+app.get("/api/owners/:id", async (req, res) => {
+  const { rows } = await pool.query(`select *, to_char(next_follow_up,'YYYY-MM-DD') as next_follow_up from owners where id=$1`, [req.params.id]);
+  if (!rows[0]) return res.status(404).json({ error: "not found" });
+  const p = await pool.query(
+    `select id, address, unit_count, status from properties where owner_id=$1 order by address`, [req.params.id]);
+  const t = await pool.query(
+    `select id, to_char(touch_date,'YYYY-MM-DD') as touch_date, channel, note
+     from touches where owner_id=$1 order by touch_date desc, created_at desc`, [req.params.id]);
+  res.json({ ...rows[0], properties: p.rows, touches: t.rows });
+});
+
+app.patch("/api/owners/:id", async (req, res) => {
+  const allowed = ["name", "status", "active", "phone", "email", "mailing_address", "next_follow_up", "notes"];
+  const sets = [], args = [];
+  for (const k of allowed) if (k in req.body) { args.push(req.body[k] === "" ? null : req.body[k]); sets.push(`${k}=$${args.length}`); }
+  if (!sets.length) return res.json({ ok: true });
+  args.push(req.params.id);
+  await pool.query(`update owners set ${sets.join(", ")} where id=$${args.length}`, args);
+  res.json({ ok: true });
+});
+
+app.delete("/api/owners/:id", async (req, res) => {
+  await pool.query(`delete from owners where id=$1`, [req.params.id]);
+  res.json({ ok: true });
+});
+
+app.post("/api/owners/:id/touch", async (req, res) => {
+  const b = req.body;
+  await pool.query(
+    `insert into touches (id, owner_id, touch_date, channel, note) values ($1,$2,$3,$4,$5)`,
+    [uid(), req.params.id, b.touch_date, b.channel, b.note || ""]
+  );
+  res.json({ ok: true });
+});
+
+app.post("/api/owners/merge", async (req, res) => {
+  const { survivorId, loserIds = [] } = req.body || {};
+  const losers = loserIds.filter((id) => id && id !== survivorId);
+  if (!survivorId || !losers.length) return res.status(400).json({ error: "survivorId and loserIds required" });
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    await client.query(`update properties set owner_id=$1 where owner_id = any($2)`, [survivorId, losers]);
+    await client.query(`update touches set owner_id=$1 where owner_id = any($2)`, [survivorId, losers]);
+    await client.query(`delete from owners where id = any($1)`, [losers]);
+    await client.query("commit");
+    res.json({ ok: true });
+  } catch (e) {
+    await client.query("rollback");
+    res.status(500).json({ error: String(e.message || e) });
+  } finally {
+    client.release();
+  }
+});
+
 /* ---------------- properties ---------------- */
 app.get("/api/properties", async (req, res) => {
   const { market, active, q, status } = req.query;
@@ -64,13 +154,13 @@ app.get("/api/properties", async (req, res) => {
   const clause = where.length ? `where ${where.join(" and ")}` : "";
   const { rows } = await pool.query(`
     select p.id, p.market_id, p.address, p.owner_name, p.phone, p.email,
-               p.unit_count, p.status, p.active,
+               p.unit_count, p.status, p.active, p.owner_id,
                to_char(p.next_follow_up, 'YYYY-MM-DD') as next_follow_up,
                p.created_at, p.extra, p.extra_order,
-               m.name as market_name,
+               m.name as market_name, o.name as linked_owner_name,
       (select to_char(max(touch_date),'YYYY-MM-DD') from touches t where t.property_id = p.id) as last_touch,
       (select channel from touches t where t.property_id = p.id order by touch_date desc, created_at desc limit 1) as last_channel
-    from properties p left join markets m on m.id = p.market_id
+    from properties p left join markets m on m.id = p.market_id left join owners o on o.id = p.owner_id
     ${clause}
     order by p.active desc, p.next_follow_up asc nulls last, p.created_at desc
     limit 2000`, args);
@@ -88,7 +178,10 @@ app.post("/api/properties", async (req, res) => {
 });
 
 app.get("/api/properties/:id", async (req, res) => {
-  const { rows } = await pool.query(`select *, to_char(next_follow_up,'YYYY-MM-DD') as next_follow_up from properties where id=$1`, [req.params.id]);
+  const { rows } = await pool.query(
+    `select p.*, to_char(p.next_follow_up,'YYYY-MM-DD') as next_follow_up, m.name as market_name, o.name as linked_owner_name
+     from properties p left join markets m on m.id = p.market_id left join owners o on o.id = p.owner_id
+     where p.id=$1`, [req.params.id]);
   if (!rows[0]) return res.status(404).json({ error: "not found" });
   const t = await pool.query(
     `select id, to_char(touch_date,'YYYY-MM-DD') as touch_date, channel, note
@@ -100,7 +193,7 @@ app.get("/api/properties/:id", async (req, res) => {
 });
 
 app.patch("/api/properties/:id", async (req, res) => {
-  const allowed = ["address", "owner_name", "phone", "email", "unit_count", "status", "active", "next_follow_up", "market_id", "notes"];
+  const allowed = ["address", "owner_name", "phone", "email", "unit_count", "status", "active", "next_follow_up", "market_id", "notes", "owner_id"];
   const sets = [], args = [];
   for (const k of allowed) if (k in req.body) { args.push(req.body[k] === "" ? null : req.body[k]); sets.push(`${k}=$${args.length}`); }
   if (req.body.extra && typeof req.body.extra === "object" && !Array.isArray(req.body.extra)) {
@@ -187,25 +280,45 @@ app.post("/api/import", async (req, res) => {
       marketId = uid();
       await client.query(`insert into markets (id, name) values ($1,$2)`, [marketId, req.body.marketName.trim()]);
     }
-    let n = 0;
+    let n = 0, ownersCreated = 0;
+    const ownerCache = new Map();
     const order = JSON.stringify(Array.isArray(req.body.order) ? req.body.order : []);
     for (const r of rows) {
       if (!r.address || !String(r.address).trim()) continue;
-      await client.query(
+      const { rows: [{ id: propId }] } = await client.query(
         `insert into properties (id, market_id, address, owner_name, phone, email, unit_count, extra, extra_order)
          values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb)
          on conflict (market_id, lower(address))
          do update set owner_name=excluded.owner_name, phone=excluded.phone,
                        email=excluded.email, unit_count=excluded.unit_count,
-                       extra=excluded.extra, extra_order=excluded.extra_order`,
+                       extra=excluded.extra, extra_order=excluded.extra_order
+         returning id`,
         [uid(), marketId || null, String(r.address).trim(), r.owner_name || "", r.phone || "",
          r.email || "", Number.isFinite(+r.unit_count) && r.unit_count !== "" ? +r.unit_count : null,
          JSON.stringify(r.extra && typeof r.extra === "object" ? r.extra : {}), order]
       );
       n++;
+
+      const ownerName = String(r.owner_name || "").trim();
+      if (ownerName) {
+        const key = ownerName.toLowerCase();
+        let ownerId = ownerCache.get(key);
+        if (!ownerId) {
+          const existing = await client.query(`select id from owners where lower(trim(name)) = $1 limit 1`, [key]);
+          if (existing.rows[0]) {
+            ownerId = existing.rows[0].id;
+          } else {
+            ownerId = uid();
+            await client.query(`insert into owners (id, name) values ($1,$2)`, [ownerId, ownerName]);
+            ownersCreated++;
+          }
+          ownerCache.set(key, ownerId);
+        }
+        await client.query(`update properties set owner_id=$1 where id=$2`, [ownerId, propId]);
+      }
     }
     await client.query("commit");
-    res.json({ imported: n, marketId });
+    res.json({ imported: n, marketId, ownersCreated });
   } catch (e) {
     await client.query("rollback");
     res.status(500).json({ error: String(e.message || e) });
