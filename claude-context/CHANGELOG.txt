@@ -1,3 +1,30 @@
+2026-07-07  Owner types + owner-to-owner links; Desk split into Follow-ups/Hotlist
+            - db.js: owners.type ('individual'|'company', app-validated); owner_links
+              many-to-many table (unique index on least/greatest pair); schema_flags
+              generic marker table; guarded guessOwnerTypesFromNames() migration
+              (word-bounded keyword regex: LLC/INC/CO/GROUP/TRUST/etc -> 'company')
+            - server.js: type on owner POST/PATCH (validated); GET /api/owners + ?q=
+              accept type= and active=true|false; GET /api/owners/:id returns
+              linkedOwners[]; POST /api/owners/:id/links + DELETE .../links/:id;
+              GET /api/properties active= accepts true|false (was 1-only); new
+              GET /api/desk?type=&status=&market_id= returning {followups (bucketed
+              overdue/today/upcoming/later), hotlist (flat, all active, unbucketed)}
+            - App.jsx: Desk tab rebuilt around GET /api/desk with a shared filter bar
+              (type/status/market/channel/search) feeding two visually distinct
+              sections — Follow-ups (bucketed, DeskFollowupRow: quick follow-up
+              buttons, log-touch icon opening the existing modal, unstar) and
+              Hotlist (flat sortable table, DeskHotlistRow, unstar); "On desk" pill
+              filter replaces the old Desk/Warehouse toggle in both PropertiesView
+              (server-side) and OwnersView (client-side); OwnerTypeToggle added to
+              AddOwnerForm + OwnerModal; new OwnerLinksSection in OwnerModal (People/
+              Companies, opposite-type search-to-link, create-and-link, unlink);
+              onOpenOwner threaded into OwnerModal so linked-owner rows can swap the
+              open overlay to another owner
+            - Note: the prior "Fix Desk to aggregate active owners and properties"
+              commit (f85dfde) turned out to be a stalled scheduled-task artifact
+              (only touched .claude/scheduled_tasks.lock + settings.local.json, no
+              real code) — this entry is the actual Desk fix, done together with the
+              owner-type/links work since the two requests overlapped on the Desk tab
 2026-07-06  Owner tracking: owners table linkable to properties
             - db.js: new `owners` table; `properties.owner_id` (FK, set null on delete);
               `touches.owner_id` (FK, cascade) + `touches.property_id` made nullable +

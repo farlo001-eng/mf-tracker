@@ -81,11 +81,46 @@ do $$ begin
 exception when duplicate_object then null;
 end $$;
 create index if not exists idx_touches_owner on touches(owner_id);
+
+alter table owners add column if not exists type text not null default 'individual';
+
+create table if not exists owner_links (
+  id text primary key,
+  owner_id_a text not null references owners(id) on delete cascade,
+  owner_id_b text not null references owners(id) on delete cascade,
+  created_at timestamptz not null default now()
+);
+create unique index if not exists idx_owner_links_pair
+  on owner_links (least(owner_id_a, owner_id_b), greatest(owner_id_a, owner_id_b));
+
+create table if not exists schema_flags (
+  key text primary key,
+  created_at timestamptz not null default now()
+);
 `;
 
 export async function ensureSchema() {
   await pool.query(SCHEMA);
   await migrateOwnersFromPropertyNames();
+  await guessOwnerTypesFromNames();
+}
+
+// One-time best-guess: owners whose name contains a company-ish keyword get type='company'.
+// User-editable afterward; guarded by a schema_flags marker so it never re-runs and
+// clobbers a manual correction to 'individual' on a later boot.
+const COMPANY_KEYWORDS = [
+  "LLC", "INC", "CO", "COMMUNITIES", "GROUP", "COMPANY", "TRUST", "PARTNERS",
+  "RESIDENTIAL", "HOLDINGS", "ESTATE", "PROPERTIES", "CAPITAL", "MANAGEMENT",
+  "VENTURES", "ENTERPRISES",
+];
+async function guessOwnerTypesFromNames() {
+  const { rows } = await pool.query(`select 1 from schema_flags where key = 'owner_type_guess_v1'`);
+  if (rows.length) return;
+
+  const pattern = `\\y(${COMPANY_KEYWORDS.join("|")})\\y`;
+  const { rowCount } = await pool.query(`update owners set type = 'company' where name ~* $1`, [pattern]);
+  await pool.query(`insert into schema_flags (key) values ('owner_type_guess_v1') on conflict do nothing`);
+  console.log(`owner type guess migration: marked ${rowCount} owners as company`);
 }
 
 // One-time backfill: turn free-text properties.owner_name into real owners rows and

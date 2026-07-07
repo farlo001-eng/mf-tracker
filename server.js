@@ -54,35 +54,45 @@ app.post("/api/markets", async (req, res) => {
 });
 
 /* ---------------- owners ---------------- */
+const OWNER_TYPES = ["individual", "company"];
+
 app.get("/api/owners", async (req, res) => {
-  const { q } = req.query;
+  const { q, type, active } = req.query;
   if (q) {
+    const where = ["name ilike $1"], args = [`%${q}%`];
+    if (type && OWNER_TYPES.includes(type)) { args.push(type); where.push(`type = $${args.length}`); }
     const { rows } = await pool.query(
-      `select id, name from owners where name ilike $1 order by name limit 20`,
-      [`%${q}%`]
+      `select id, name, type from owners where ${where.join(" and ")} order by name limit 20`, args
     );
     return res.json(rows);
   }
+  const where = [], args = [];
+  if (type && OWNER_TYPES.includes(type)) { args.push(type); where.push(`o.type = $${args.length}`); }
+  if (active === "true") where.push(`o.active = true`);
+  else if (active === "false") where.push(`o.active = false`);
+  const clause = where.length ? `where ${where.join(" and ")}` : "";
   const { rows } = await pool.query(`
-    select o.id, o.name, o.status, o.active, o.phone, o.email, o.mailing_address,
+    select o.id, o.name, o.type, o.status, o.active, o.phone, o.email, o.mailing_address,
            to_char(o.next_follow_up, 'YYYY-MM-DD') as next_follow_up, o.notes, o.created_at,
            count(p.id)::int as property_count,
            coalesce(sum(p.unit_count), 0)::int as total_units,
            (select to_char(max(touch_date),'YYYY-MM-DD') from touches t where t.owner_id = o.id) as last_touch,
            (select channel from touches t where t.owner_id = o.id order by touch_date desc, created_at desc limit 1) as last_channel
     from owners o left join properties p on p.owner_id = o.id
+    ${clause}
     group by o.id
     order by o.active desc, o.next_follow_up asc nulls last, o.created_at desc
-  `);
+  `, args);
   res.json(rows);
 });
 
 app.post("/api/owners", async (req, res) => {
   const b = req.body || {}, id = uid();
+  if (b.type && !OWNER_TYPES.includes(b.type)) return res.status(400).json({ error: "type must be 'individual' or 'company'" });
   await pool.query(
-    `insert into owners (id, name, status, active, phone, email, mailing_address, next_follow_up, notes)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-    [id, (b.name || "Untitled owner").trim(), b.status || "New", !!b.active, b.phone || "",
+    `insert into owners (id, name, type, status, active, phone, email, mailing_address, next_follow_up, notes)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+    [id, (b.name || "Untitled owner").trim(), b.type || "individual", b.status || "New", !!b.active, b.phone || "",
      b.email || "", b.mailing_address || "", b.next_follow_up || null, b.notes || ""]
   );
   res.json({ id });
@@ -96,11 +106,17 @@ app.get("/api/owners/:id", async (req, res) => {
   const t = await pool.query(
     `select id, to_char(touch_date,'YYYY-MM-DD') as touch_date, channel, note
      from touches where owner_id=$1 order by touch_date desc, created_at desc`, [req.params.id]);
-  res.json({ ...rows[0], properties: p.rows, touches: t.rows });
+  const l = await pool.query(
+    `select o2.id, o2.name, o2.type
+     from owner_links l join owners o2 on o2.id = (case when l.owner_id_a = $1 then l.owner_id_b else l.owner_id_a end)
+     where l.owner_id_a = $1 or l.owner_id_b = $1
+     order by o2.name`, [req.params.id]);
+  res.json({ ...rows[0], properties: p.rows, touches: t.rows, linkedOwners: l.rows });
 });
 
 app.patch("/api/owners/:id", async (req, res) => {
-  const allowed = ["name", "status", "active", "phone", "email", "mailing_address", "next_follow_up", "notes"];
+  if ("type" in req.body && !OWNER_TYPES.includes(req.body.type)) return res.status(400).json({ error: "type must be 'individual' or 'company'" });
+  const allowed = ["name", "type", "status", "active", "phone", "email", "mailing_address", "next_follow_up", "notes"];
   const sets = [], args = [];
   for (const k of allowed) if (k in req.body) { args.push(req.body[k] === "" ? null : req.body[k]); sets.push(`${k}=$${args.length}`); }
   if (!sets.length) return res.json({ ok: true });
@@ -119,6 +135,26 @@ app.post("/api/owners/:id/touch", async (req, res) => {
   await pool.query(
     `insert into touches (id, owner_id, touch_date, channel, note) values ($1,$2,$3,$4,$5)`,
     [uid(), req.params.id, b.touch_date, b.channel, b.note || ""]
+  );
+  res.json({ ok: true });
+});
+
+app.post("/api/owners/:id/links", async (req, res) => {
+  const linkedOwnerId = req.body?.linkedOwnerId;
+  if (!linkedOwnerId || linkedOwnerId === req.params.id) return res.status(400).json({ error: "linkedOwnerId required" });
+  const [a, b] = [req.params.id, linkedOwnerId].sort();
+  await pool.query(
+    `insert into owner_links (id, owner_id_a, owner_id_b) values ($1,$2,$3)
+     on conflict (least(owner_id_a, owner_id_b), greatest(owner_id_a, owner_id_b)) do nothing`,
+    [uid(), a, b]
+  );
+  res.json({ ok: true });
+});
+
+app.delete("/api/owners/:id/links/:linkedOwnerId", async (req, res) => {
+  await pool.query(
+    `delete from owner_links where (owner_id_a=$1 and owner_id_b=$2) or (owner_id_a=$2 and owner_id_b=$1)`,
+    [req.params.id, req.params.linkedOwnerId]
   );
   res.json({ ok: true });
 });
@@ -148,7 +184,8 @@ app.get("/api/properties", async (req, res) => {
   const { market, active, q, status } = req.query;
   const where = [], args = [];
   if (market) { args.push(market); where.push(`p.market_id = $${args.length}`); }
-  if (active === "1") where.push(`p.active = true`);
+  if (active === "1" || active === "true") where.push(`p.active = true`);
+  else if (active === "false") where.push(`p.active = false`);
   if (status) { args.push(status); where.push(`p.status = $${args.length}`); }
   if (q) { args.push(`%${q}%`); where.push(`(p.address ilike $${args.length} or p.owner_name ilike $${args.length} or p.phone ilike $${args.length})`); }
   const clause = where.length ? `where ${where.join(" and ")}` : "";
@@ -331,6 +368,64 @@ app.post("/api/import", async (req, res) => {
 const dist = path.join(__dirname, "client", "dist");
 app.use(express.static(dist));
 app.get("*", (_req, res) => res.sendFile(path.join(dist, "index.html")));
+
+/* ---------------- desk (follow-ups + hotlist) ---------------- */
+const pad2 = (n) => String(n).padStart(2, "0");
+const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
+const addDaysStr = (base, n) => {
+  const [y, m, d] = base.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() + n);
+  return `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`;
+};
+
+app.get("/api/desk", async (req, res) => {
+  const { type, status, market_id } = req.query;
+  const rows = [];
+
+  if (type !== "owner") {
+    const where = ["p.active = true"], args = [];
+    if (status) { args.push(status); where.push(`p.status = $${args.length}`); }
+    if (market_id) { args.push(market_id); where.push(`p.market_id = $${args.length}`); }
+    const { rows: props } = await pool.query(`
+      select p.id, p.address as name, p.status,
+             to_char(p.next_follow_up, 'YYYY-MM-DD') as next_follow_up,
+             (select to_char(max(touch_date),'YYYY-MM-DD') from touches t where t.property_id = p.id) as last_touch,
+             (select channel from touches t where t.property_id = p.id order by touch_date desc, created_at desc limit 1) as last_channel
+      from properties p where ${where.join(" and ")}`, args);
+    props.forEach((r) => rows.push({ type: "property", ...r }));
+  }
+
+  if (type !== "property") {
+    const where = ["o.active = true"], args = [];
+    if (status) { args.push(status); where.push(`o.status = $${args.length}`); }
+    const { rows: owns } = await pool.query(`
+      select o.id, o.name, o.status,
+             to_char(o.next_follow_up, 'YYYY-MM-DD') as next_follow_up,
+             (select to_char(max(touch_date),'YYYY-MM-DD') from touches t where t.owner_id = o.id) as last_touch,
+             (select channel from touches t where t.owner_id = o.id order by touch_date desc, created_at desc limit 1) as last_channel
+      from owners o where ${where.join(" and ")}`, args);
+    owns.forEach((r) => rows.push({ type: "owner", ...r }));
+  }
+
+  const today = todayStr();
+  const weekOut = addDaysStr(today, 7);
+  const bucketOf = (nfu) => {
+    if (nfu < today) return "overdue";
+    if (nfu === today) return "today";
+    if (nfu <= weekOut) return "upcoming";
+    return "later";
+  };
+  const bucketOrder = { overdue: 0, today: 1, upcoming: 2, later: 3 };
+
+  const followups = rows
+    .filter((r) => r.next_follow_up)
+    .map((r) => ({ ...r, bucket: bucketOf(r.next_follow_up) }))
+    .sort((a, b) => (bucketOrder[a.bucket] - bucketOrder[b.bucket]) || a.next_follow_up.localeCompare(b.next_follow_up));
+  const hotlist = rows.slice().sort((a, b) => a.name.localeCompare(b.name));
+
+  res.json({ followups, hotlist });
+});
 
 const port = process.env.PORT || 3000;
 ensureSchema().then(() => console.log("schema ready")).catch((e) => console.error("schema error (will retry on use):", e.message));

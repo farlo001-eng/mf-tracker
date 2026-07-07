@@ -1,71 +1,84 @@
-## Current State (2026-07-06)
+## Current State (2026-07-07)
 
-Owner tracking added. Owners are now first-class records, distinct from the free-text
-`owner_name` field that stays on properties (imported data remains sacred/untouched).
-Properties link to owners via a nullable `owner_id` FK.
+Owner tracking (individual/company + owner-to-owner links) and a reworked Desk tab
+(Follow-ups + Hotlist) are in. Owners remain distinct from the free-text `owner_name`
+field on properties (imported data stays sacred/untouched); `owner_id` is the link layer.
 
 ### DB additions (db.js)
-- `owners` table: id, name, status, active, phone, email, mailing_address,
-  next_follow_up, notes, created_at
-- `properties.owner_id` — nullable FK to owners, `on delete set null`
-- `touches.owner_id` — nullable FK to owners, `on delete cascade`; `touches.property_id`
-  is now nullable too. `touches_one_target` CHECK constraint enforces exactly one of
-  property_id / owner_id is set per touch row (added via a guarded `do $$ ... $$` block
-  so re-running ensureSchema on every boot doesn't error on the second run).
-- `idx_props_owner`, `idx_owners_active`, `idx_touches_owner` indexes
-- One-time backfill `migrateOwnersFromPropertyNames()` runs inside `ensureSchema()`,
-  guarded to only fire while the `owners` table is still empty: creates one owner per
-  distinct (case-insensitive, trimmed) `owner_name` across existing properties (first-seen
-  casing wins), links matching properties, logs counts created/linked.
+- `owners` table + `owners.type` (`'individual'|'company'`, default `'individual'`,
+  app-layer validated only — no db enum).
+- `properties.owner_id` — nullable FK to owners, `on delete set null`.
+- `touches.owner_id` — nullable FK to owners, cascade; `touches.property_id` nullable;
+  `touches_one_target` CHECK enforces exactly one of property_id/owner_id (guarded via
+  `do $$ ... exception when duplicate_object ... end $$` so re-running ensureSchema on
+  every boot doesn't error the 2nd+ time).
+- `owner_links` table (owner_id_a, owner_id_b) — many-to-many owner-to-owner links, with
+  a unique index on `(least(a,b), greatest(a,b))` so link direction doesn't matter.
+- `schema_flags` table — generic one-row-per-key marker table for guarding one-time
+  migrations (first user: `owner_type_guess_v1`). Prefer this pattern over ad-hoc
+  "is the table still empty" checks for any *future* one-time migration, since it doesn't
+  get confused by a user's later manual edit that happens to match the "untouched" state.
+- Guarded migrations run inside `ensureSchema()`:
+  - `migrateOwnersFromPropertyNames()` — backfills owners from properties.owner_name
+    (guarded by `owners` table being empty).
+  - `guessOwnerTypesFromNames()` — regex keyword match (LLC/INC/CO/GROUP/TRUST/etc,
+    word-bounded, case-insensitive) sets `type='company'`; guarded by `schema_flags`.
 
 ### Server additions (server.js)
-- Full owners CRUD: `GET/POST /api/owners` (list has property_count/total_units/last_touch/
-  last_channel rollups; `?q=` does a lightweight ilike name search for the combobox),
-  `GET/PATCH/DELETE /api/owners/:id` (detail includes linked `properties[]` and `touches[]`),
-  `POST /api/owners/:id/touch`, `POST /api/owners/merge` (`{survivorId, loserIds}` —
-  repoints properties/touches then deletes losers, transactional).
-- `PATCH /api/properties/:id` allows `owner_id` now.
-- `GET /api/properties` and `GET /api/properties/:id` both join `owners` and return
-  `linked_owner_name` (list) / `linked_owner_name` + `market_name` (detail).
-- `POST /api/import` links/creates an owner per row from `owner_name` (case-insensitive
-  match, per-request in-memory cache to avoid duplicate lookups within one import),
-  returns `ownersCreated` alongside `imported`.
+- Owners: `type` added to POST/PATCH (validated to individual|company, 400 if not);
+  `GET /api/owners` list + `?q=` search both accept `type=` and `active=true|false`;
+  `GET /api/owners/:id` now also returns `linkedOwners: [{id,name,type}]` (joined through
+  `owner_links` both directions); `POST /api/owners/:id/links` `{linkedOwnerId}` and
+  `DELETE /api/owners/:id/links/:linkedOwnerId`.
+- `GET /api/properties` — `active` param now also accepts `true`/`false` (was `1`-only).
+- New `GET /api/desk?type=&status=&market_id=` — returns `{ followups, hotlist }`.
+  `followups` = active owners+properties that HAVE a next_follow_up, each tagged with a
+  `bucket` (`overdue|today|upcoming|later`, computed from server-local today ± 7d) and
+  sorted bucket-then-date. `hotlist` = ALL active owners+properties, flat, unbucketed.
+  `market_id` only filters the properties half (owners have no market). Channel filtering
+  is intentionally NOT a server param — the frontend filters `last_channel` client-side.
 
 ### Client additions (App.jsx)
-- Top-level nav: **Desk / Properties / Owners** tabs, owned by `Tracker`. `Tracker` also
-  owns `expandedPropertyId` / `expandedOwnerId` (so any view can open either overlay) and
-  a `refreshKey`/`bump()` pair so mutations in one view refresh data in the others.
-- `DeskView` — unified due/overdue list merging active owners + active properties
-  (client-side merge + sort by next_follow_up), badge per row ("Owner"/"Property"),
-  channel icon, click opens the right overlay.
-- `PropertiesView` — the old Tracker body (market filter, Desk/Warehouse sub-tab, search,
-  columns picker, filters, status pills, table). `PropertyRow` no longer owns modal state;
-  it just renders the row and calls `onOpen()`. New `owner_id` column (type `"owner"`,
-  in `CORE_COLS`/`DEFAULT_COLS`) renders a clickable owner chip or a muted "+ link"
-  affordance, both open the property modal.
-- `PropertyModal` — extracted from the old inline PropertyRow modal so it can be opened
-  from anywhere (Desk, Owners, or the table) by id alone; fetches its own detail. New
-  "Linked owner" section renders `OwnerLink`.
-- `OwnerLink` — combobox: searches `/api/owners?q=`, links on click; if no owner_id and
-  `owner_name` is non-blank, offers "+ Create new owner named '...'" (editable) which
-  POSTs then links; shows chip + "Unlink" once linked.
-- `OwnersView` / `OwnerRow` / `AddOwnerForm` — sortable table (click header toggles
-  asc/desc) mirroring the properties table's visual language; Desk star toggles `active`.
-- `OwnerModal` — same structural/CSS pattern as PropertyModal: editable fields, touch
-  logger + history (reuses `TouchRow` as-is — it already just hits `/api/touches/:id`),
-  linked-properties list (click opens `PropertyModal` for that property), delete.
-- No new CSS was needed — everything reuses `.link`, `.pill`, `.card`, `.tbl*`, `.colpop`,
-  `.row-btn` etc.
+- **Desk tab rebuilt**: shared filter bar (All/Properties/Owners segmented type toggle,
+  status dropdown, market dropdown [disabled when Owners-only], channel dropdown, search)
+  feeds one `GET /api/desk` call. Two visually distinct `.card` sections below it:
+  - **Follow-ups** — bucketed (`DESK_BUCKETS`), `DeskFollowupRow` per item: name/status/
+    last-touch, channel icon, overdue/due-today/date pill, +3d/+1w/+2w/+1mo quick buttons,
+    a "log touch" icon button (opens the property/owner modal — no inline touch UI here),
+    and a star to unstar (PATCH active:false) without leaving the page.
+  - **Hotlist** — flat sortable table (`DeskHotlistRow`, click-header sort like
+    OwnersView), same unstar action, next_follow_up shown as a plain column (no bucket
+    framing, "—" if unset).
+  - `DeskTypeBadge` is the shared Owner/Property pill used in both sections.
+- **"On desk" filter replaces the old Desk/Warehouse toggle** in both `PropertiesView`
+  (server-side, `active=true` query param) and `OwnersView` (client-side, since that view
+  already filters everything client-side) — a pill next to the status pills, matching
+  that visual language instead of a segmented tab.
+- **Owner type**: `OwnerTypeToggle` (Individual/Company segmented control) used in both
+  `AddOwnerForm` and `OwnerModal` (patches `type` directly on change in the modal).
+- **`OwnerLinksSection`** in `OwnerModal`, below Linked Properties — shows a "People"
+  section if the current owner is a company, or "Companies" if individual. Search box
+  hits `/api/owners?q=&type=<opposite>`; click a result to link, "+ Create new
+  <opposite type>" to create-then-link, "Unlink" per row. Clicking a linked owner's name
+  calls `onOpenOwner` (now threaded from `Tracker` into `OwnerModal` alongside
+  `onOpenProperty`) to swap the currently-open overlay to that owner.
+- No new CSS was needed anywhere in this pass either — reused `.pill`, `.link`, `.card`,
+  `.tbl*`, `.colpop`, `.row-btn`, the existing segmented-toggle inline-style pattern, etc.
 
 ### Known gap / manual step required
-No `pg_dump`/Railway CLI/`DATABASE_URL` were available in the dev sandbox that built this,
-so the pre-migration production backup (task step 0) was **not** run automatically.
-Before deploying, run:
+No `pg_dump`/Railway CLI/`DATABASE_URL` are available in the dev sandbox used to build
+this. Before deploying schema changes, run:
 `pg_dump $DATABASE_URL > backup_pre_owners_$(date +%Y%m%d).sql` and confirm the file is
-non-empty. The owners backfill migration runs automatically on next boot via
-`ensureSchema()` — it is additive/guarded, but the backup should still happen first.
+non-empty. All migrations in `ensureSchema()` are additive/guarded, but back up first.
+
+### Housekeeping note (not part of this feature)
+`.claude/scheduled_tasks.lock` (a live sessionId/pid lock file) and a permissions-probing
+`.claude/settings.local.json` got committed to git in commit `f85dfde` — likely a stalled
+scheduled-task run from during a tool outage, not intentional. Worth a look before the
+next deploy; not touched by this change.
 
 ### Next step
-No pending code work. Possible additions: merge-duplicate-owners UI (API already
-supports `POST /api/owners/merge`, no frontend yet), keyboard nav between desk rows,
-owner attachments (properties have them, owners don't yet).
+No pending code work from the current request. Possible additions: merge-duplicate-owners
+UI (API already supports `POST /api/owners/merge`, no frontend yet), keyboard nav between
+desk rows, owner attachments (properties have them, owners don't yet), a `type` column in
+the Owners table itself (currently only surfaced in the create/edit form + detail overlay).
