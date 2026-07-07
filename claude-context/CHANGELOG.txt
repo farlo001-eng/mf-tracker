@@ -1,3 +1,15 @@
+2026-07-07  Fix Desk tab showing 0 items in Follow-ups and Hotlist
+            - server.js: GET /api/desk (added earlier the same day) was registered
+              after the express.static/app.get("*") SPA catch-all, so every request
+              to it matched the catch-all first and got back index.html (200 OK)
+              instead of JSON — moved the route (+ its pad2/todayStr/addDaysStr
+              helpers) above the "serve built client" block
+            - App.jsx: DeskView's load() was swallowing the resulting JSON-parse
+              rejection with a bare .catch(() => {}), so the broken fetch silently
+              rendered the "nothing due"/"nothing on desk" empty states instead of
+              surfacing a failure; added a loadError state + red-bordered error card
+            - Lesson recorded in STATE.txt: new server.js routes must be added above
+              the static/catch-all block or they'll never be reached
 2026-07-07  Owner types + owner-to-owner links; Desk split into Follow-ups/Hotlist
             - db.js: owners.type ('individual'|'company', app-validated); owner_links
               many-to-many table (unique index on least/greatest pair); schema_flags

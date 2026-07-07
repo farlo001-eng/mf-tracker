@@ -205,13 +205,14 @@ function DeskView({ markets, refreshKey, bump, onOpenProperty, onOpenOwner }) {
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState({ key: "name", dir: "asc" });
   const [data, setData] = useState({ followups: [], hotlist: [] });
+  const [loadError, setLoadError] = useState(false);
 
   const load = useCallback(() => {
     const params = new URLSearchParams();
     if (type) params.set("type", type);
     if (status) params.set("status", status);
     if (type !== "owner" && marketId) params.set("market_id", marketId);
-    api.get(`/api/desk?${params}`).then(setData).catch(() => {});
+    api.get(`/api/desk?${params}`).then((d) => { setData(d); setLoadError(false); }).catch(() => setLoadError(true));
   }, [type, status, marketId]);
   useEffect(() => { load(); }, [load, refreshKey]);
 
@@ -263,6 +264,12 @@ function DeskView({ markets, refreshKey, bump, onOpenProperty, onOpenOwner }) {
           <input className="in" style={{ paddingLeft: 32 }} placeholder="Search name or address…" value={query} onChange={(e) => setQuery(e.target.value)} />
         </div>
       </div>
+
+      {loadError && (
+        <div className="card" style={{ padding: 16, marginBottom: 18, borderColor: "var(--rust)", color: "var(--rust)", fontSize: 13 }}>
+          Couldn't load the desk — the request to /api/desk failed. Try refreshing; if it keeps happening, check the server logs.
+        </div>
+      )}
 
       {/* follow-ups */}
       <div className="card" style={{ padding: 16, marginBottom: 18 }}>

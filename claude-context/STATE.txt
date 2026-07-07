@@ -4,6 +4,24 @@ Owner tracking (individual/company + owner-to-owner links) and a reworked Desk t
 (Follow-ups + Hotlist) are in. Owners remain distinct from the free-text `owner_name`
 field on properties (imported data stays sacred/untouched); `owner_id` is the link layer.
 
+### Fixed same day: Desk showed 0 items in both sections
+Root cause: `GET /api/desk` was registered in server.js *after* the Express catch-all
+(`app.use(express.static(dist)); app.get("*", ...)` that serves `index.html` for the SPA).
+Express matches routes in registration order, so every request to `/api/desk` matched the
+catch-all first and got back `index.html` with a 200 status. The frontend's `api.get`
+helper (`fetch(u).then(r => r.ok ? r.json() : Promise.reject(r))`) saw `r.ok === true` and
+tried to `.json()`-parse HTML, which threw — and `DeskView`'s `load()` swallowed that
+rejection with a bare `.catch(() => {})`, so the UI silently rendered the "nothing due" /
+"nothing on desk" empty states instead of surfacing a failure. The SQL/filter logic itself
+was correct the whole time.
+Fix: moved the `/api/desk` route (and its `pad2`/`todayStr`/`addDaysStr` helpers) to
+before the "serve built client" block. Also added a `loadError` state to `DeskView` — a
+failed `/api/desk` fetch now shows a red-bordered error card instead of a false empty
+state, so this class of bug is visible next time instead of silent.
+**Lesson**: any new API route added to server.js must go above the
+`app.use(express.static(dist))` / `app.get("*", ...)` catch-all, or it will silently
+404-via-index.html instead of ever reaching its handler.
+
 ### DB additions (db.js)
 - `owners` table + `owners.type` (`'individual'|'company'`, default `'individual'`,
   app-layer validated only — no db enum).
@@ -78,7 +96,10 @@ scheduled-task run from during a tool outage, not intentional. Worth a look befo
 next deploy; not touched by this change.
 
 ### Next step
-No pending code work from the current request. Possible additions: merge-duplicate-owners
-UI (API already supports `POST /api/owners/merge`, no frontend yet), keyboard nav between
-desk rows, owner attachments (properties have them, owners don't yet), a `type` column in
-the Owners table itself (currently only surfaced in the create/edit form + detail overlay).
+No pending code work from the current request. Desk tab should be verified live (star a
+property/owner with and without a next_follow_up, confirm it shows in Hotlist always and
+in Follow-ups only when dated) since this sandbox still has no Node/build to run it.
+Possible additions: merge-duplicate-owners UI (API already supports `POST
+/api/owners/merge`, no frontend yet), keyboard nav between desk rows, owner attachments
+(properties have them, owners don't yet), a `type` column in the Owners table itself
+(currently only surfaced in the create/edit form + detail overlay).

@@ -364,11 +364,6 @@ app.post("/api/import", async (req, res) => {
   }
 });
 
-/* ---------------- serve built client ---------------- */
-const dist = path.join(__dirname, "client", "dist");
-app.use(express.static(dist));
-app.get("*", (_req, res) => res.sendFile(path.join(dist, "index.html")));
-
 /* ---------------- desk (follow-ups + hotlist) ---------------- */
 const pad2 = (n) => String(n).padStart(2, "0");
 const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
@@ -426,6 +421,11 @@ app.get("/api/desk", async (req, res) => {
 
   res.json({ followups, hotlist });
 });
+
+/* ---------------- serve built client ---------------- */
+const dist = path.join(__dirname, "client", "dist");
+app.use(express.static(dist));
+app.get("*", (_req, res) => res.sendFile(path.join(dist, "index.html")));
 
 const port = process.env.PORT || 3000;
 ensureSchema().then(() => console.log("schema ready")).catch((e) => console.error("schema error (will retry on use):", e.message));
