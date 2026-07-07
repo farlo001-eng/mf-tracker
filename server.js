@@ -383,7 +383,7 @@ app.get("/api/desk", async (req, res) => {
     if (status) { args.push(status); where.push(`p.status = $${args.length}`); }
     if (market_id) { args.push(market_id); where.push(`p.market_id = $${args.length}`); }
     const { rows: props } = await pool.query(`
-      select p.id, p.address as name, p.status,
+      select p.id, coalesce(nullif(p.extra->>'Property Name', ''), p.address) as name, p.status,
              to_char(p.next_follow_up, 'YYYY-MM-DD') as next_follow_up,
              (select to_char(max(touch_date),'YYYY-MM-DD') from touches t where t.property_id = p.id) as last_touch,
              (select channel from touches t where t.property_id = p.id order by touch_date desc, created_at desc limit 1) as last_channel

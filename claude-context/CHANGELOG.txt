@@ -1,3 +1,14 @@
+2026-07-07  Fix Desk Hotlist/Follow-ups property rows showing address instead of name
+            - server.js: GET /api/desk's property query hardcoded `p.address as name`,
+              ignoring the property's display name entirely. The name actually lives in
+              the extra jsonb field under the key "Property Name" (same field the
+              property detail modal title already falls back to, App.jsx:615) — there is
+              no dedicated property_name column. Changed the query to
+              `coalesce(nullif(p.extra->>'Property Name', ''), p.address) as name` so
+              blank/null names fall back to address, matching existing behavior
+              elsewhere in the app. Both Follow-ups and Hotlist read from the same
+              `rows` array built by this query, so one fix covers both sections. Owner
+              rows (o.name) were untouched.
 2026-07-07  Fix Desk tab showing 0 items in Follow-ups and Hotlist
             - server.js: GET /api/desk (added earlier the same day) was registered
               after the express.static/app.get("*") SPA catch-all, so every request

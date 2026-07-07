@@ -4,6 +4,21 @@ Owner tracking (individual/company + owner-to-owner links) and a reworked Desk t
 (Follow-ups + Hotlist) are in. Owners remain distinct from the free-text `owner_name`
 field on properties (imported data stays sacred/untouched); `owner_id` is the link layer.
 
+### Fixed same day: Desk Hotlist/Follow-ups showed address instead of property name
+`GET /api/desk`'s property query hardcoded `p.address as name`. There is no
+`property_name` column — the property's display name lives in the `extra` jsonb field
+under the key `"Property Name"` (same field the property detail modal title falls back
+on, `App.jsx:615`: `detail?.extra?.["Property Name"] || detail?.address`). Fixed the
+query (`server.js`, `/api/desk` property branch) to
+`coalesce(nullif(p.extra->>'Property Name', ''), p.address) as name` so blank/null names
+fall back to address. Follow-ups and Hotlist both read from the same `rows` array this
+query builds, so the fix covers both sections with one change. Owner rows (`o.name`)
+were already correct and untouched.
+**Note for later**: the main Properties table itself does NOT apply this fallback in its
+own "Property Name" column (`colVal` in `App.jsx` returns `p.extra?.["Property Name"] ??
+""` with no `|| address`) — only the detail-modal title does. If the fallback should also
+show in the Properties table's own column, that's a separate, not-yet-requested change.
+
 ### Fixed same day: Desk showed 0 items in both sections
 Root cause: `GET /api/desk` was registered in server.js *after* the Express catch-all
 (`app.use(express.static(dist)); app.get("*", ...)` that serves `index.html` for the SPA).
@@ -96,9 +111,11 @@ scheduled-task run from during a tool outage, not intentional. Worth a look befo
 next deploy; not touched by this change.
 
 ### Next step
-No pending code work from the current request. Desk tab should be verified live (star a
-property/owner with and without a next_follow_up, confirm it shows in Hotlist always and
-in Follow-ups only when dated) since this sandbox still has no Node/build to run it.
+No pending code work from the current request. Desk tab (including the Hotlist
+name-column fallback fix above) should be verified live — star a property with a blank
+"Property Name" and confirm its Hotlist/Follow-ups row shows the address, then set a
+"Property Name" and confirm the row switches to showing that instead — since this
+sandbox still has no Node/build to run it.
 Possible additions: merge-duplicate-owners UI (API already supports `POST
 /api/owners/merge`, no frontend yet), keyboard nav between desk rows, owner attachments
 (properties have them, owners don't yet), a `type` column in the Owners table itself
