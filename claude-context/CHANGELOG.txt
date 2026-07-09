@@ -1,3 +1,22 @@
+2026-07-08  Widen search to cover all data fields, scoped per section (Properties/
+            Owners/Desk); no shared global search bar
+            - server.js GET /api/properties: q now also matches email and
+              extra::text (jsonb cast — covers "Property Name" and any custom field,
+              since there's no dedicated property_name column), was address/owner_name/
+              phone only
+            - server.js GET /api/owners: q now matches name/type/phone/email/notes, was
+              name only. Added a `picker=1` flag to distinguish the slim link-combobox
+              lookup (OwnerLink, OwnerLinksSection — {id,name,type}, limit 20) from the
+              full Owners-tab row shape, so the main Owners tab could start sending q to
+              this same endpoint without colliding with the picker's response shape
+            - server.js GET /api/desk: added a new q param, applying the properties
+              matching to property rows and the owners matching to owner rows before
+              they're merged into the single array Follow-ups/Hotlist both derive from —
+              one search term filters both sections consistently
+            - App.jsx: OwnersView.load() now sends q server-side (debounced) instead of
+              filtering client-side on name only; DeskView (already had a search box,
+              previously client-side name-only) now sends q to /api/desk instead;
+              PropertiesView needed no change, already wired to q
 2026-07-07  Fix Desk Hotlist/Follow-ups property rows showing address instead of name
             - server.js: GET /api/desk's property query hardcoded `p.address as name`,
               ignoring the property's display name entirely. The name actually lives in

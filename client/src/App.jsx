@@ -212,19 +212,16 @@ function DeskView({ markets, refreshKey, bump, onOpenProperty, onOpenOwner }) {
     if (type) params.set("type", type);
     if (status) params.set("status", status);
     if (type !== "owner" && marketId) params.set("market_id", marketId);
+    if (query.trim()) params.set("q", query.trim());
     api.get(`/api/desk?${params}`).then((d) => { setData(d); setLoadError(false); }).catch(() => setLoadError(true));
-  }, [type, status, marketId]);
-  useEffect(() => { load(); }, [load, refreshKey]);
+  }, [type, status, marketId, query]);
+  useEffect(() => { const t = setTimeout(load, query ? 250 : 0); return () => clearTimeout(t); }, [load, query, refreshKey]);
 
   const reload = () => { load(); bump(); };
   const openItem = (item) => (item.type === "owner" ? onOpenOwner(item.id) : onOpenProperty(item.id));
   const patchItem = (item, body) => api.send(`/api/${item.type === "owner" ? "owners" : "properties"}/${item.id}`, "PATCH", body).then(reload);
 
-  const matches = (item) => {
-    if (channel && item.last_channel !== channel) return false;
-    if (query.trim() && !item.name.toLowerCase().includes(query.trim().toLowerCase())) return false;
-    return true;
-  };
+  const matches = (item) => !channel || item.last_channel === channel;
   const followups = data.followups.filter(matches);
   const hotlist = data.hotlist.filter(matches);
   const grouped = DESK_BUCKETS.map(([key, label]) => ({ key, label, items: followups.filter((f) => f.bucket === key) })).filter((g) => g.items.length);
@@ -261,7 +258,7 @@ function DeskView({ markets, refreshKey, bump, onOpenProperty, onOpenOwner }) {
         </select>
         <div style={{ position: "relative", flex: "1 1 200px" }}>
           <Search size={15} style={{ position: "absolute", left: 10, top: 10, color: "var(--muted)" }} />
-          <input className="in" style={{ paddingLeft: 32 }} placeholder="Search name or address…" value={query} onChange={(e) => setQuery(e.target.value)} />
+          <input className="in" style={{ paddingLeft: 32 }} placeholder="Search name, address, phone, email…" value={query} onChange={(e) => setQuery(e.target.value)} />
         </div>
       </div>
 
@@ -725,7 +722,7 @@ function OwnerLink({ property, onSaved, onOpenOwner }) {
   useEffect(() => { setNewName(property.owner_name || ""); }, [property.owner_name]);
   useEffect(() => {
     if (!q.trim()) { setResults([]); return; }
-    const t = setTimeout(() => { api.get(`/api/owners?q=${encodeURIComponent(q.trim())}`).then(setResults).catch(() => {}); }, 200);
+    const t = setTimeout(() => { api.get(`/api/owners?picker=1&q=${encodeURIComponent(q.trim())}`).then(setResults).catch(() => {}); }, 200);
     return () => clearTimeout(t);
   }, [q]);
 
@@ -783,8 +780,12 @@ function OwnersView({ refreshKey, bump, onOpenOwner }) {
   const [sort, setSort] = useState({ key: "next_follow_up", dir: "asc" });
   const [adding, setAdding] = useState(false);
 
-  const load = useCallback(() => api.get("/api/owners").then(setOwners).catch(() => {}), []);
-  useEffect(() => { load(); }, [load, refreshKey]);
+  const load = useCallback(() => {
+    const p = new URLSearchParams();
+    if (query.trim()) p.set("q", query.trim());
+    api.get(`/api/owners?${p}`).then(setOwners).catch(() => {});
+  }, [query]);
+  useEffect(() => { const t = setTimeout(load, query ? 250 : 0); return () => clearTimeout(t); }, [load, query, refreshKey]);
 
   const toggleSort = (key) => setSort((s) => (s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" }));
 
@@ -792,9 +793,8 @@ function OwnersView({ refreshKey, bump, onOpenOwner }) {
     let list = owners;
     if (status !== "All") list = list.filter((o) => o.status === status);
     if (onDeskOnly) list = list.filter((o) => o.active);
-    if (query.trim()) { const q = query.trim().toLowerCase(); list = list.filter((o) => o.name.toLowerCase().includes(q)); }
     return list;
-  }, [owners, status, onDeskOnly, query]);
+  }, [owners, status, onDeskOnly]);
 
   const sorted = useMemo(() => {
     const { key, dir } = sort, mul = dir === "asc" ? 1 : -1;
@@ -1035,7 +1035,7 @@ function OwnerLinksSection({ owner, onSaved, onOpenOwner }) {
   useEffect(() => {
     if (!q.trim()) { setResults([]); return; }
     const t = setTimeout(() => {
-      api.get(`/api/owners?q=${encodeURIComponent(q.trim())}&type=${oppositeType}`).then(setResults).catch(() => {});
+      api.get(`/api/owners?picker=1&q=${encodeURIComponent(q.trim())}&type=${oppositeType}`).then(setResults).catch(() => {});
     }, 200);
     return () => clearTimeout(t);
   }, [q, oppositeType]);

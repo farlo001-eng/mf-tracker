@@ -57,9 +57,11 @@ app.post("/api/markets", async (req, res) => {
 const OWNER_TYPES = ["individual", "company"];
 
 app.get("/api/owners", async (req, res) => {
-  const { q, type, active } = req.query;
-  if (q) {
-    const where = ["name ilike $1"], args = [`%${q}%`];
+  const { q, type, active, picker } = req.query;
+  // picker=1 is the slim link-combobox lookup (OwnerLink / OwnerLinksSection); anything
+  // else with a q is the full Owners-tab search and returns the full row shape below.
+  if (q && picker) {
+    const where = ["(name ilike $1 or type ilike $1 or phone ilike $1 or email ilike $1 or notes ilike $1)"], args = [`%${q}%`];
     if (type && OWNER_TYPES.includes(type)) { args.push(type); where.push(`type = $${args.length}`); }
     const { rows } = await pool.query(
       `select id, name, type from owners where ${where.join(" and ")} order by name limit 20`, args
@@ -67,6 +69,11 @@ app.get("/api/owners", async (req, res) => {
     return res.json(rows);
   }
   const where = [], args = [];
+  if (q) {
+    args.push(`%${q}%`);
+    where.push(`(o.name ilike $${args.length} or o.type ilike $${args.length} or o.phone ilike $${args.length}
+      or o.email ilike $${args.length} or o.notes ilike $${args.length})`);
+  }
   if (type && OWNER_TYPES.includes(type)) { args.push(type); where.push(`o.type = $${args.length}`); }
   if (active === "true") where.push(`o.active = true`);
   else if (active === "false") where.push(`o.active = false`);
@@ -187,7 +194,11 @@ app.get("/api/properties", async (req, res) => {
   if (active === "1" || active === "true") where.push(`p.active = true`);
   else if (active === "false") where.push(`p.active = false`);
   if (status) { args.push(status); where.push(`p.status = $${args.length}`); }
-  if (q) { args.push(`%${q}%`); where.push(`(p.address ilike $${args.length} or p.owner_name ilike $${args.length} or p.phone ilike $${args.length})`); }
+  if (q) {
+    args.push(`%${q}%`);
+    where.push(`(p.address ilike $${args.length} or p.owner_name ilike $${args.length} or p.phone ilike $${args.length}
+      or p.email ilike $${args.length} or p.extra::text ilike $${args.length})`);
+  }
   const clause = where.length ? `where ${where.join(" and ")}` : "";
   const { rows } = await pool.query(`
     select p.id, p.market_id, p.address, p.owner_name, p.phone, p.email,
@@ -375,13 +386,18 @@ const addDaysStr = (base, n) => {
 };
 
 app.get("/api/desk", async (req, res) => {
-  const { type, status, market_id } = req.query;
+  const { type, status, market_id, q } = req.query;
   const rows = [];
 
   if (type !== "owner") {
     const where = ["p.active = true"], args = [];
     if (status) { args.push(status); where.push(`p.status = $${args.length}`); }
     if (market_id) { args.push(market_id); where.push(`p.market_id = $${args.length}`); }
+    if (q) {
+      args.push(`%${q}%`);
+      where.push(`(p.address ilike $${args.length} or p.owner_name ilike $${args.length} or p.phone ilike $${args.length}
+        or p.email ilike $${args.length} or p.extra::text ilike $${args.length})`);
+    }
     const { rows: props } = await pool.query(`
       select p.id, coalesce(nullif(p.extra->>'Property Name', ''), p.address) as name, p.status,
              to_char(p.next_follow_up, 'YYYY-MM-DD') as next_follow_up,
@@ -394,6 +410,11 @@ app.get("/api/desk", async (req, res) => {
   if (type !== "property") {
     const where = ["o.active = true"], args = [];
     if (status) { args.push(status); where.push(`o.status = $${args.length}`); }
+    if (q) {
+      args.push(`%${q}%`);
+      where.push(`(o.name ilike $${args.length} or o.type ilike $${args.length} or o.phone ilike $${args.length}
+        or o.email ilike $${args.length} or o.notes ilike $${args.length})`);
+    }
     const { rows: owns } = await pool.query(`
       select o.id, o.name, o.status,
              to_char(o.next_follow_up, 'YYYY-MM-DD') as next_follow_up,

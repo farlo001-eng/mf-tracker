@@ -1,10 +1,42 @@
-## Current State (2026-07-07)
+## Current State (2026-07-08)
 
 Owner tracking (individual/company + owner-to-owner links) and a reworked Desk tab
 (Follow-ups + Hotlist) are in. Owners remain distinct from the free-text `owner_name`
 field on properties (imported data stays sacred/untouched); `owner_id` is the link layer.
 
-### Fixed same day: Desk Hotlist/Follow-ups showed address instead of property name
+### 2026-07-08: widened search to cover all data fields, scoped per section
+Each section's search (Properties, Owners, Desk) previously matched only 1-3 fields.
+Widened all three, keeping each scoped to its own section (no shared global search):
+- `GET /api/properties` `q`: was `address, owner_name, phone` → added `email` and
+  `extra::text ilike` (the jsonb blob holding `"Property Name"` and any other custom
+  field — there's no dedicated `property_name` column, see the Hotlist fix above, so
+  casting `extra` to text is how a property's display name gets matched).
+- `GET /api/owners` `q`: was `name` only, and only ever used by the two link-picker
+  comboboxes (`OwnerLink` in the property modal, `OwnerLinksSection` in the owner modal)
+  — the main Owners tab search box was 100% client-side, matching `name` only, and never
+  called this endpoint with `q` at all. Widened matching to `name, type, phone, email,
+  notes` for both. To let the main Owners tab hit the same endpoint with `q` (for the
+  wider server-side match) without colliding with the picker's slim `{id,name,type}`
+  response shape (limit 20, used for typeahead), added a `picker=1` flag: the picker's
+  two call sites now send `picker=1&q=...`; the Owners tab sends plain `q=...` and gets
+  the full row shape (property_count, total_units, last_touch, etc.) filtered server-side.
+  If a new consumer needs the slim picker shape, it must pass `picker=1` or it will get
+  the full-list shape instead.
+- `GET /api/desk`: had no `q` param at all. Added one; applies the properties matching
+  above to property rows and the owners matching above to owner rows, inside each
+  branch's existing `where` build, before both branches are merged into the single
+  `rows` array that Follow-ups and Hotlist both derive from — so one search term filters
+  both sections identically. Channel filtering stays client-side only, as before/by design.
+- Frontend: `PropertiesView` was already wired to `q`, no change needed there.
+  `OwnersView.load()` now builds a `URLSearchParams` with `q` (was `api.get("/api/owners")`
+  with zero params) and debounces like `PropertiesView` does; its client-side `filtered`
+  memo dropped the now-redundant name substring check (status/on-desk pills stay
+  client-side, unchanged). `DeskView` already had a search input in its toolbar (contrary
+  to the request's assumption that it needed adding) — it was filtering `item.name`
+  client-side; now sends `q` to `/api/desk` (debounced same as Properties/Owners) and
+  `matches()` only does the channel check client-side.
+
+### Fixed same day (2026-07-07): Desk Hotlist/Follow-ups showed address instead of property name
 `GET /api/desk`'s property query hardcoded `p.address as name`. There is no
 `property_name` column — the property's display name lives in the `extra` jsonb field
 under the key `"Property Name"` (same field the property detail modal title falls back
@@ -111,11 +143,15 @@ scheduled-task run from during a tool outage, not intentional. Worth a look befo
 next deploy; not touched by this change.
 
 ### Next step
-No pending code work from the current request. Desk tab (including the Hotlist
-name-column fallback fix above) should be verified live — star a property with a blank
-"Property Name" and confirm its Hotlist/Follow-ups row shows the address, then set a
-"Property Name" and confirm the row switches to showing that instead — since this
-sandbox still has no Node/build to run it.
+No pending code work from the current request. Both this session's changes and the
+2026-07-07 Hotlist name-fallback fix should be verified live once Node/build is
+available (this sandbox still has neither): star a property with a blank "Property Name"
+to confirm Hotlist/Follow-ups falls back to address; then try searching each of the
+three sections (Properties/Owners/Desk) by phone, email, and notes/extra-field values
+that don't appear in the name/address to confirm the widened match actually round-trips
+through the server, and confirm the owner-link comboboxes (property modal's owner-link
+box, and the People/Companies box in the owner modal) still return results now that
+they pass `picker=1`.
 Possible additions: merge-duplicate-owners UI (API already supports `POST
 /api/owners/merge`, no frontend yet), keyboard nav between desk rows, owner attachments
 (properties have them, owners don't yet), a `type` column in the Owners table itself
